@@ -101,9 +101,11 @@
     "@violentmonkey/shortcut": "^1.2.6",
     "@zip.js/zip.js": "2.4.4",
     "codemirror": "^5.65.10",
+    "mcp-framework": "^0.1.24",
     "tldts": "^6.0.14",
     "vue": "^3.4.38",
-    "vueleton": "^2.0.2"
+    "vueleton": "^2.0.2",
+    "zod": "^3.24.2"
   },
   "engines": {
     "node": ">=20"

@@ -29,9 +29,11 @@ import { setLocationHash, store } from '../utils';
 import Installed from './tab-installed';
 import Settings from './tab-settings';
 import About from './tab-about';
+import McpServers from './tab-mcp-servers';
 
 const tabs = [
   { name: SCRIPTS, comp: Installed, label: i18n('sideMenuInstalled') },
+  { name: 'servers', comp: McpServers, label: i18n('sideMenuServers') },
   { name: TAB_SETTINGS, comp: Settings, label: i18n('sideMenuSettings') },
   { name: TAB_ABOUT, comp: About, label: i18n('sideMenuAbout') },
   { name: TAB_RECYCLE, comp: Installed, label: i18n('buttonRecycleBin') },

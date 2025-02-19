@@ -1,6 +1,6 @@
 import '@/common/browser';
 import {
-  formatByteLength, getLocaleString, getScriptUpdateUrl, i18n, makePause, sendCmdDirectly, trueJoin,
+  formatByteLength, getLocaleString, getScriptUpdateUrl, i18n, makePause, sendCmdDirectly, 
 } from '@/common';
 import handlers from '@/common/handlers';
 import { loadScriptIcon } from '@/common/load-script-icon';
@@ -10,6 +10,10 @@ import '@/common/ui/favicon';
 import '@/common/ui/style';
 import { kDescription, kName, kStorageSize, performSearch, store } from './utils';
 import App from './views/app';
+
+// Constants
+export const SCRIPTS = 'scripts';
+export const SERVERS = 'servers';
 
 // Same order as getSizes and sizesPrefixRe
 const SIZE_TITLES = [
@@ -41,7 +45,7 @@ function initScript(script, sizes, code) {
     getLocaleString(meta, kDescription),
     custom[kName],
     custom[kDescription],
-  ]::trueJoin('\n');
+  ].filter(Boolean).join('\n');
   const name = custom[kName] || localeName;
   let total = 0;
   let str = '';
@@ -76,19 +80,42 @@ async function requestData(id) {
     sendCmdDirectly('GetData', { id, sizes: true }, { retry: true }),
     options.ready,
   ]);
-  const { [SCRIPTS]: allScripts, sizes, ...auxData } = data;
+  const { [SCRIPTS]: allScripts, [SERVERS]: allServers, sizes, ...auxData } = data;
   Object.assign(store, auxData); // initScripts needs `cache` in store
   const scripts = [];
   const removedScripts = [];
+  const servers = [];
+  const removedServers = [];
+
   // modifying scripts without triggering reactivity
   allScripts.forEach((script, i) => {
     initScript(script, sizes[i]);
     (script.config.removed ? removedScripts : scripts).push(script);
   });
+
+  // modifying servers without triggering reactivity
+  allServers?.forEach((server) => {
+    initServer(server);
+    (server.config.removed ? removedServers : servers).push(server);
+  });
+
   // now we can render
   store.scripts = scripts;
   store.removedScripts = removedScripts;
+  store.servers = servers;
+  store.removedServers = removedServers;
   store.loading = false;
+}
+
+function initServer(server) {
+  const $cache = server.$cache || (server.$cache = {});
+  const { props, custom } = server;
+  const name = props.name;
+  $cache.name = name;
+  $cache.lowerName = name.toLowerCase();
+  $cache.tags = custom.tags || '';
+  server.$canUpdate = server.config.shouldUpdate;
+  loadScriptIcon(server, store, true);
 }
 
 function initMain() {

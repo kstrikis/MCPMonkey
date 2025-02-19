@@ -1,0 +1,19 @@
+// Server-related messages
+export const sideMenuServers = 'MCP Servers';
+export const labelSearchServer = 'Search servers...';
+export const labelNoSearchServers = 'No servers found.';
+export const updateServersAll = 'Update all servers';
+export const connectToServer = 'Connect to server';
+export const hintInputServerURL = 'Enter server URL';
+export const buttonNew = 'New server';
+export const buttonDisable = 'Disable server';
+export const buttonEnable = 'Enable server';
+export const buttonUpdate = 'Update server';
+export const buttonConnect = 'Connect to server';
+export const buttonRemove = 'Remove server';
+export const filterAlphabeticalOrder = 'Alphabetical';
+export const filterLastUpdateOrder = 'Last updated';
+export const sortOrder = 'Sort by';
+export const msgInvalidServer = 'Invalid server configuration';
+export const msgUpdated = 'Server updated';
+export const msgInstalled = 'Server installed'; 
