@@ -48,14 +48,14 @@ jobs:
           path: 'dist/*'
           if-no-files-found: error
 
-      - name: Upload to Transifex - check src
-        if: github.event_name == 'push' || github.event.pull_request.merged == true
-        uses: marceloprado/has-changed-path@v1.0.1
-        id: changed-path-src
-        with:
-          paths: src
-      - name: Upload to Transifex
-        if: steps.changed-path-src.outputs.changed == 'true'
-        run: node scripts/transifex.mjs update
-        env:
-          TRANSIFEX_TOKEN: ${{ secrets.TRANSIFEX_TOKEN }}
+      # - name: Upload to Transifex - check src
+      #   if: github.event_name == 'push' || github.event.pull_request.merged == true
+      #   uses: marceloprado/has-changed-path@v1.0.1
+      #   id: changed-path-src
+      #   with:
+      #     paths: src
+      # - name: Upload to Transifex
+      #   if: steps.changed-path-src.outputs.changed == 'true'
+      #   run: node scripts/transifex.mjs update
+      #   env:
+      #     TRANSIFEX_TOKEN: ${{ secrets.TRANSIFEX_TOKEN }}
