@@ -44,15 +44,15 @@ jobs:
         with:
           deno-version: v2.x
 
-      - name: Publish to Edge
-        run: |
-          if [ "$PRERELEASE" != "true" ]; then
-            deno run -A https://raw.githubusercontent.com/violentmonkey/publish-edge-ext/main/main.ts $ASSETS_DIR/$ASSET_ZIP
-          else
-            echo Skip BETA for Edge
-          fi
-        env:
-          ACCESS_TOKEN_URL: ${{ secrets.EDGE_ACCESS_TOKEN_URL }}
-          CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
-          CLIENT_SECRET: ${{ secrets.EDGE_CLIENT_SECRET }}
-          PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
+      # - name: Publish to Edge
+      #   run: |
+      #     if [ "$PRERELEASE" != "true" ]; then
+      #       deno run -A https://raw.githubusercontent.com/violentmonkey/publish-edge-ext/main/main.ts $ASSETS_DIR/$ASSET_ZIP
+      #     else
+      #       echo Skip BETA for Edge
+      #     fi
+      #   env:
+      #     ACCESS_TOKEN_URL: ${{ secrets.EDGE_ACCESS_TOKEN_URL }}
+      #     CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
+      #     CLIENT_SECRET: ${{ secrets.EDGE_CLIENT_SECRET }}
+      #     PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
