@@ -23,6 +23,14 @@ const DEFAULT_SERVER = {
     lastUpdated: Date.now(),
     position: 0,
   },
+  meta: {
+    name: 'Calculator Server',
+    description: 'A simple calculator server that can perform basic arithmetic operations',
+    version: '1.0.0',
+    require: [],
+    resources: {},
+    grant: [],
+  },
   command: 'node',
   args: ['calculator-server.js'],
   config: {
@@ -84,6 +92,14 @@ export function newServer() {
       lastUpdated: 0,
       position: 0,
     },
+    meta: {
+      name: '',
+      description: '',
+      version: '',
+      require: [],
+      resources: {},
+      grant: [],
+    },
     command: '',
     args: [],
     config: getDefaultServerConfig(),
@@ -96,8 +112,8 @@ export function getServerById(id) {
   return serverMap[id];
 }
 
-export function getServer({ id, uri }) {
-  return id ? getServerById(id) : uri && aliveServers.find(script => script.props.uri === uri);
+export function getServer({ id }) {
+  return id ? getServerById(id) : null;
 }
 
 export function getServers() {
@@ -147,10 +163,10 @@ export async function parseServer(src) {
     aliveServers.push(server);
   }
 
-  const { config, custom, props } = server;
+  const { config, custom, props, meta } = server;
   
   // Overwriting inner data by `src`, deleting keys for which `src` specifies `null`
-  for (const key of ['config', 'custom', 'props']) {
+  for (const key of ['config', 'custom', 'props', 'meta']) {
     const dst = server[key];
     const srcData = src[key];
     if (srcData) {
@@ -160,6 +176,10 @@ export async function parseServer(src) {
       });
     }
   }
+
+  // Ensure meta is synchronized with props
+  meta.name = props.name;
+  meta.description = props.description;
 
   // Handle command and args
   if (src.command != null) server.command = src.command;
@@ -212,18 +232,9 @@ export async function removeServers(ids) {
   }
 
   const data = await storage.base.getMulti(keys);
-  const uriMap = {};
   const defaultCustom = getDefaultCustom();
 
-  // If no servers exist, add the default server
-  if (Object.keys(data).length === 0) {
-    await storage.base.set({
-      [S_SERVER_PRE + DEFAULT_SERVER.props.id]: DEFAULT_SERVER,
-      [S_SERVER_CONFIG_PRE + DEFAULT_SERVER.props.id]: DEFAULT_SERVER.config,
-    });
-    data[S_SERVER_PRE + DEFAULT_SERVER.props.id] = DEFAULT_SERVER;
-  }
-
+  // First process existing data
   Object.entries(data).forEach(([key, server]) => {
     const id = +storage[S_SERVER].toId(key);
     if (id && server) {
@@ -233,11 +244,6 @@ export async function removeServers(ids) {
           // ID conflicts - should not happen, discard duplicates
           return;
         }
-        if (uriMap[server.props.uri]) {
-          // URI conflicts - should not happen, discard duplicates
-          return;
-        }
-        uriMap[server.props.uri] = server;
       }
 
       server.props = {
@@ -250,6 +256,39 @@ export async function removeServers(ids) {
       maxServerPosition = Math.max(maxServerPosition, server.props.position || 0);
       
       (server.config.removed ? removedServers : aliveServers).push(server);
+      serverMap[id] = server;
     }
   });
+
+  // Check if calculator server exists
+  const hasCalculator = aliveServers.some(server => 
+    server.command === 'node' && 
+    server.args.includes('calculator-server.js') &&
+    !server.config.removed
+  );
+
+  // If calculator doesn't exist, add it
+  if (!hasCalculator) {
+    // Create a copy of the default server with a new ID
+    const defaultServer = {
+      ...DEFAULT_SERVER,
+      props: {
+        ...DEFAULT_SERVER.props,
+        id: maxServerId + 1,
+        lastModified: Date.now(),
+        lastUpdated: Date.now(),
+        position: maxServerPosition + 1,
+      },
+    };
+
+    await storage.base.set({
+      [S_SERVER_PRE + defaultServer.props.id]: defaultServer,
+      [S_SERVER_CONFIG_PRE + defaultServer.props.id]: defaultServer.config,
+    });
+
+    serverMap[defaultServer.props.id] = defaultServer;
+    aliveServers.push(defaultServer);
+    maxServerId = defaultServer.props.id;
+    maxServerPosition = defaultServer.props.position;
+  }
 })(); 

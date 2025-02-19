@@ -72,6 +72,18 @@ class StorageArea {
       : data);
     return data;
   }
+
+  /**
+   * @param {number[]} ids
+   * @return {Promise<number[]>}
+   */
+  async getSizes(ids) {
+    const data = await this.getMulti(ids);
+    return ids.map(id => {
+      const item = data[id];
+      return item ? JSON.stringify(item).length : 0;
+    });
+  }
 }
 
 // TODO: add Firefox version to the comment when https://bugzil.la/1910669 is fixed

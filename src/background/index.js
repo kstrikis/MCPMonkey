@@ -12,6 +12,8 @@ import './utils/storage-fetch';
 import './utils/tab-redirector';
 import './utils/tester';
 import './utils/update';
+import './utils/db';
+import './utils/server-commands';
 
 addPublicCommands({
   /**

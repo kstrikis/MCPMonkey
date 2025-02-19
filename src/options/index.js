@@ -111,8 +111,20 @@ function initServer(server) {
   const $cache = server.$cache || (server.$cache = {});
   const { props, custom } = server;
   const name = props.name;
+  
+  // Initialize meta property if it doesn't exist
+  server.meta = server.meta || {
+    name: props.name,
+    description: props.description,
+    version: '',
+    require: [],
+    resources: {},
+    grant: [],
+  };
+  
   $cache.name = name;
   $cache.lowerName = name.toLowerCase();
+  $cache.desc = props.description;
   $cache.tags = custom.tags || '';
   server.$canUpdate = server.config.shouldUpdate;
   loadScriptIcon(server, store, true);

@@ -54,3 +54,5 @@ export const ERR_BAD_PATTERN = 'Bad pattern:';
 export const VM_HOME = 'https://github.com/kstrikis/MCPMonkey';
 export const VM_DOCS_MATCHING = VM_HOME + 'api/matching/';
 export const FILE_GLOB_ALL = 'file://*/*';
+export const SCRIPTS = 'scripts';
+export const SERVERS = 'servers';
