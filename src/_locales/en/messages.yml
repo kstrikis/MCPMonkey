@@ -962,6 +962,24 @@ sideMenuInstalled:
 sideMenuSettings:
   description: 'Side menu: Settings'
   message: Settings
+sideMenuServers:
+  description: 'Side menu: MCP Servers'
+  message: MCP Servers
+labelSearchServer:
+  description: 'Placeholder text for server search box'
+  message: Search servers...
+labelNoSearchServers:
+  description: 'Message shown when no servers match the search'
+  message: No matching servers found
+updateServersAll:
+  description: 'Tooltip for update all servers button'
+  message: Update all servers
+connectToServer:
+  description: 'Menu item to connect to an existing server'
+  message: Connect to server
+hintInputServerURL:
+  description: 'Prompt shown when connecting to a server'
+  message: Enter the server URL (e.g. example.com:9000)
 skipScripts:
   description: Title of the hotkey in the browser UI for customizing the hotkeys.
   message: Reload page without userscripts
@@ -1047,3 +1065,32 @@ visitWebsite:
   description: Label for link to open MCPMonkey website.
   message: Visit Website
   touched: false
+
+# Server-related messages
+labelCommand:
+  description: 'Label for server command input'
+  message: Command
+labelArgs:
+  description: 'Label for server arguments input'
+  message: Arguments
+labelEnabled:
+  description: 'Label for server enabled checkbox'
+  message: Enabled
+labelDescription:
+  description: 'Label for server description input'
+  message: Description
+hintCommand:
+  description: 'Hint for server command input'
+  message: Enter the command to run the server
+hintArgs:
+  description: 'Hint for server arguments input'
+  message: Enter arguments (one per line)
+hintArgsFormat:
+  description: 'Hint for server arguments format'
+  message: Each line will be passed as a separate argument
+hintDescription:
+  description: 'Hint for server description input'
+  message: Enter a description for this server
+hintTags:
+  description: 'Hint for server tags input'
+  message: Enter tags (space separated)

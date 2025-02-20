@@ -4,7 +4,7 @@ import {
   getScriptPrettyUrl, getScriptRunAt, makePause, isValidHttpUrl, normalizeTag,
   ignoreChromeErrors,
 } from '@/common';
-import { FETCH_OPTS, INFERRED, TIMEOUT_24HOURS, TIMEOUT_WEEK, TL_AWAIT } from '@/common/consts';
+import { FETCH_OPTS, INFERRED, TIMEOUT_24HOURS, TIMEOUT_WEEK, TL_AWAIT, SCRIPTS, SERVERS } from '@/common/consts';
 import { deepSize, forEachEntry, forEachKey, forEachValue } from '@/common/object';
 import pluginEvents from '../plugin/events';
 import { getDefaultCustom, getNameURI, inferScriptProps, newScript, parseMeta } from './script';
@@ -469,7 +469,7 @@ export function notifyToOpenScripts(title, text, ids) {
 
 /**
  * @desc Get data for dashboard.
- * @return {Promise<{ scripts: VMScript[], cache: Object }>}
+ * @return {Promise<{ scripts: VMScript[], servers: MCPServer[], cache: Object }>}
  */
 export async function getData({ id, ids, sizes }) {
   if (id) ids = [id];
@@ -480,6 +480,12 @@ export async function getData({ id, ids, sizes }) {
     : getScriptsByIdsOrAll();
   scripts.forEach(inferScriptProps);
   res[SCRIPTS] = scripts;
+  
+  // Add server data
+  const { servers, removedServers } = await commands.GetServerData({ id, sizes });
+  res[SERVERS] = servers;
+  res.removedServers = removedServers;
+  
   if (sizes) res.sizes = getSizes(ids);
   if (!id) res.cache = await getIconCache(scripts);
   if (!id && sizes) res.sync = commands.SyncGetStates();

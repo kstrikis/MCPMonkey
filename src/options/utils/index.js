@@ -9,11 +9,17 @@ export const store = reactive({
   batch: null,
   /** Speedup and deflicker initial page load by not rendering an invisible script list */
   canRenderScripts: [SCRIPTS, TAB_RECYCLE, ''].includes(route.hash),
+  /** Similar to canRenderScripts but for servers */
+  canRenderServers: ['servers', ''].includes(route.hash),
   scripts: [],
   removedScripts: [],
+  servers: [],
+  removedServers: [],
   loading: false,
   /** Whether removed scripts need to be filtered from `store.scripts`. */
   needRefresh: false,
+  /** Whether removed servers need to be filtered from `store.servers`. */
+  needServerRefresh: false,
   sync: [],
   title: null,
 });

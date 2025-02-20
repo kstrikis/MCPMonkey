@@ -72,6 +72,18 @@ class StorageArea {
       : data);
     return data;
   }
+
+  /**
+   * @param {number[]} ids
+   * @return {Promise<number[]>}
+   */
+  async getSizes(ids) {
+    const data = await this.getMulti(ids);
+    return ids.map(id => {
+      const item = data[id];
+      return item ? JSON.stringify(item).length : 0;
+    });
+  }
 }
 
 // TODO: add Firefox version to the comment when https://bugzil.la/1910669 is fixed
@@ -89,6 +101,13 @@ export const S_SCRIPT = 'script';
 export const S_SCRIPT_PRE = 'scr:';
 export const S_VALUE = 'value';
 export const S_VALUE_PRE = 'val:';
+
+// MCP Server storage constants
+export const S_SERVER = 'server';
+export const S_SERVER_PRE = 'srv:';
+export const S_SERVER_CONFIG = 'serverConfig';
+export const S_SERVER_CONFIG_PRE = 'srvcfg:';
+
 /** @type {{ [prefix: string]: StorageArea }} */
 export const storageByPrefix = {};
 /**
@@ -98,6 +117,8 @@ export const storageByPrefix = {};
  * @prop {StorageArea} require
  * @prop {StorageArea} script
  * @prop {StorageArea} value
+ * @prop {StorageArea} server
+ * @prop {StorageArea} serverConfig
  */
 const storage = {
   get api() { return api; },
@@ -112,6 +133,8 @@ const storage = {
   [S_REQUIRE]: new StorageArea(S_REQUIRE, S_REQUIRE_PRE),
   [S_SCRIPT]: new StorageArea(S_SCRIPT, S_SCRIPT_PRE),
   [S_VALUE]: new StorageArea(S_VALUE, S_VALUE_PRE),
+  [S_SERVER]: new StorageArea(S_SERVER, S_SERVER_PRE),
+  [S_SERVER_CONFIG]: new StorageArea(S_SERVER_CONFIG, S_SERVER_CONFIG_PRE),
 };
 export default storage;
 
