@@ -144,24 +144,24 @@ function sendResponse(response) {
 async function executeAction(action, data) {
   log.info(`Executing browser action: ${action}`, data);
   
-  switch (action) {
-    case 'getTabs':
-      return browser.runtime.sendMessage({ cmd: 'GetTabs', data });
-    case 'createTab':
-      return browser.runtime.sendMessage({ cmd: 'CreateTab', data });
-    case 'closeTabs':
-      return browser.runtime.sendMessage({ cmd: 'CloseTabs', data });
-    case 'activateTab':
-      return browser.runtime.sendMessage({ cmd: 'ActivateTab', data });
-    case 'reloadTab':
-      return browser.runtime.sendMessage({ cmd: 'ReloadTab', data });
-    case 'duplicateTab':
-      return browser.runtime.sendMessage({ cmd: 'DuplicateTab', data });
-    default:
-      const error = new Error(`Unknown action: ${action}`);
-      log.error(error);
-      throw error;
+  if (!action) {
+    throw new Error('No action specified');
   }
+
+  const actions = {
+    getTabs: () => browser.runtime.sendMessage({ cmd: 'GetTabs', data }),
+    createTab: () => browser.runtime.sendMessage({ cmd: 'CreateTab', data }),
+    closeTabs: () => browser.runtime.sendMessage({ cmd: 'CloseTabs', data }),
+    activateTab: () => browser.runtime.sendMessage({ cmd: 'ActivateTab', data }),
+    reloadTab: () => browser.runtime.sendMessage({ cmd: 'ReloadTab', data }),
+    duplicateTab: () => browser.runtime.sendMessage({ cmd: 'DuplicateTab', data })
+  };
+
+  if (action in actions) {
+    return actions[action]();
+  }
+
+  throw new Error(`Unknown action: ${action}`);
 }
 
 // Send ping to verify connection
