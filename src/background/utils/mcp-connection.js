@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars */
-import { addOwnCommands } from './init';
+// import { addOwnCommands } from './init'; // Removed unused import
 
 // Logging utility
 const LOG_PREFIX = '[MCP Connection]';
@@ -45,6 +45,7 @@ function connect() {
 
     ws.onerror = (error) => {
       log.error('WebSocket error:', error);
+      // No need to call handleDisconnect here, as onerror usually precedes onclose
       handleConnectionError(error);
     };
   } catch (error) {
@@ -139,8 +140,8 @@ function handleConnectionError(error) {
 }
 
 function handleDisconnect(error) {
+  // No need to call ws.close() here; it's already closing/closed
   if (ws) {
-    ws.close();
     ws = null;
   }
   
@@ -177,16 +178,17 @@ async function executeAction(action, data) {
   }
 
   const actions = {
-    getTabs: () => browser.runtime.sendMessage({ cmd: 'GetTabs', data }),
-    createTab: () => browser.runtime.sendMessage({ cmd: 'CreateTab', data }),
-    closeTabs: () => browser.runtime.sendMessage({ cmd: 'CloseTabs', data }),
-    activateTab: () => browser.runtime.sendMessage({ cmd: 'ActivateTab', data }),
-    reloadTab: () => browser.runtime.sendMessage({ cmd: 'ReloadTab', data }),
-    duplicateTab: () => browser.runtime.sendMessage({ cmd: 'DuplicateTab', data })
+    getTabs: async () => await browser.runtime.sendMessage({ cmd: 'GetTabs', data }),
+    createTab: async () => await browser.runtime.sendMessage({ cmd: 'CreateTab', data }),
+    closeTabs: async () => await browser.runtime.sendMessage({ cmd: 'CloseTabs', data }),
+    activateTab: async () => await browser.runtime.sendMessage({ cmd: 'ActivateTab', data }),
+    reloadTab: async () => await browser.runtime.sendMessage({ cmd: 'ReloadTab', data }),
+    duplicateTab: async () => await browser.runtime.sendMessage({ cmd: 'DuplicateTab', data })
   };
 
   if (action in actions) {
-    return actions[action]();
+    // Await the result of the action
+    return await actions[action]();
   }
 
   throw new Error(`Unknown action: ${action}`);
@@ -201,9 +203,10 @@ function sendPing() {
 
   try {
     log.debug('Sending ping');
+    const requestId = crypto.randomUUID(); // Store requestId
     ws.send(JSON.stringify({
       type: 'ping',
-      requestId: crypto.randomUUID(),
+      requestId,
       timestamp: Date.now()
     }));
   } catch (error) {
@@ -223,7 +226,7 @@ connect();
 
 // Export functions for use in other modules
 export const mcpConnection = {
-  ws,
+  //  ws, // Don't expose ws directly
   requestPermission,
   
   // Expose reconnect function for manual intervention
@@ -231,5 +234,18 @@ export const mcpConnection = {
     log.info('Manual reconnection requested');
     connectionAttempts = 0; // Reset counter for manual reconnection
     connect();
-  }
+  },
+
+    // Add a send function if other modules need to send messages
+    send: (message) => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            try {
+                ws.send(JSON.stringify(message));
+            } catch (error) {
+                log.error('Failed to send message:', error);
+            }
+        } else {
+            log.error('Cannot send message: WebSocket is not connected');
+        }
+    }
 }; 
