@@ -20,7 +20,9 @@ browser_action:
   default_title: __MSG_extName__
   default_popup: popup/index.html
 background:
-  scripts: []
+  scripts:
+    - background/index.js
+  persistent: true
 options_ui:
   page: options/index.html#settings
   open_in_tab: true
@@ -43,6 +45,7 @@ permissions:
   - clipboardWrite
   - contextMenus
   - cookies
+  - nativeMessaging
 commands:
   _execute_browser_action: {}
   toggleInjection:
@@ -68,5 +71,5 @@ minimum_chrome_version: '61.0'
 
 browser_specific_settings:
   gecko:
-    id: '{aecec67f-0d10-4fa7-b7c7-609a2db280cf}'
+    id: 'mcpmonkey@kstrikis.github.io'
     strict_min_version: '58.0'

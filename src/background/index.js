@@ -14,6 +14,8 @@ import './utils/tester';
 import './utils/update';
 import './utils/db';
 import './utils/server-commands';
+import './utils/mcp-connection';
+import './utils/browser-actions';
 
 addPublicCommands({
   /**
