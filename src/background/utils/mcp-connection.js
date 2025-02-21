@@ -10,30 +10,43 @@ const log = {
   debug: (...args) => console.debug(LOG_PREFIX, ...args),
 };
 
-// Connection state tracking
-let connectionAttempts = 0;
+// WebSocket configuration
+const WS_URL = 'ws://localhost:3025';
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY = 5000; // 5 seconds
+
+// Connection state tracking
+let connectionAttempts = 0;
+let ws = null;
 
 // Store pending requests by their requestId
 const pendingRequests = new Map();
 
-// Connection management
-let port = null;
-
 function connect() {
   try {
     log.info('Attempting to connect to MCP server...');
-    port = browser.runtime.connectNative('mcpmonkey');
+    ws = new WebSocket(WS_URL);
     connectionAttempts++;
     
     setupMessageHandlers();
     
-    log.info('Successfully connected to MCP server');
-    connectionAttempts = 0; // Reset counter on successful connection
-    
-    // Send initial ping to verify connection
-    sendPing();
+    ws.onopen = () => {
+      log.info('Successfully connected to MCP server');
+      connectionAttempts = 0; // Reset counter on successful connection
+      
+      // Send initial ping to verify connection
+      sendPing();
+    };
+
+    ws.onclose = (event) => {
+      log.error('WebSocket connection closed:', event.code, event.reason);
+      handleDisconnect(new Error(`WebSocket closed: ${event.code} ${event.reason}`));
+    };
+
+    ws.onerror = (error) => {
+      log.error('WebSocket error:', error);
+      handleConnectionError(error);
+    };
   } catch (error) {
     log.error('Failed to connect to MCP server:', error);
     handleConnectionError(error);
@@ -41,21 +54,22 @@ function connect() {
 }
 
 function setupMessageHandlers() {
-  if (!port) {
-    log.error('Cannot setup handlers: port is null');
+  if (!ws) {
+    log.error('Cannot setup handlers: WebSocket is null');
     return;
   }
 
-port.onMessage.addListener(async (message) => {
-  try {
+  ws.onmessage = async (event) => {
+    try {
+      const message = JSON.parse(event.data);
       log.debug('Received message:', message);
       
-    if (!message || typeof message !== 'object') {
+      if (!message || typeof message !== 'object') {
         log.error('Invalid message received:', message);
-      return;
-    }
+        return;
+      }
 
-    const { type, requestId, action, data } = message;
+      const { type, requestId, action, data } = message;
 
       if (type === 'executeAction') {
         if (!requestId || !action) {
@@ -65,10 +79,28 @@ port.onMessage.addListener(async (message) => {
 
         try {
           log.info(`Executing action: ${action}`, data);
+          
+          // Handle test messages specifically
+          if (action === 'testMessage') {
+            log.info('Received test message:', data.message);
+            // Send an acknowledgment back
+            sendResponse({
+              type: 'browserActionResponse',
+              requestId,
+              action: 'testMessage',
+              data: {
+                received: true,
+                message: data.message,
+                timestamp: new Date().toISOString(),
+                echo: `Received your message: ${data.message}`
+              }
+            });
+            return;
+          }
+
           const result = await executeAction(action, data);
           log.debug(`Action ${action} completed:`, result);
 
-          // Send the response back with the correct type
           sendResponse({
             type: 'browserActionResponse',
             requestId,
@@ -77,7 +109,6 @@ port.onMessage.addListener(async (message) => {
           });
         } catch (error) {
           log.error(`Failed to execute action ${action}:`, error);
-          // Send error response with the correct type
           sendResponse({
             type: 'error',
             requestId,
@@ -93,13 +124,7 @@ port.onMessage.addListener(async (message) => {
     } catch (error) {
       log.error('Error handling MCP server message:', error);
     }
-  });
-
-port.onDisconnect.addListener((p) => {
-  const error = browser.runtime.lastError;
-    log.error('Disconnected from MCP server:', error?.message || 'Unknown reason');
-    handleDisconnect(error);
-  });
+  };
 }
 
 function handleConnectionError(error) {
@@ -114,7 +139,10 @@ function handleConnectionError(error) {
 }
 
 function handleDisconnect(error) {
-  port = null;
+  if (ws) {
+    ws.close();
+    ws = null;
+  }
   
   // Clear all pending requests
   for (const [requestId, { reject }] of pendingRequests) {
@@ -127,14 +155,14 @@ function handleDisconnect(error) {
 }
 
 function sendResponse(response) {
-  if (!port) {
-    log.error('Cannot send response: port is null');
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    log.error('Cannot send response: WebSocket is not connected');
     return;
   }
 
   try {
     log.debug('Sending response:', response);
-    port.postMessage(response);
+    ws.send(JSON.stringify(response));
   } catch (error) {
     log.error('Failed to send response:', error);
   }
@@ -166,18 +194,18 @@ async function executeAction(action, data) {
 
 // Send ping to verify connection
 function sendPing() {
-  if (!port) {
-    log.error('Cannot send ping: port is null');
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    log.error('Cannot send ping: WebSocket is not connected');
     return;
   }
 
   try {
     log.debug('Sending ping');
-    port.postMessage({
+    ws.send(JSON.stringify({
       type: 'ping',
       requestId: crypto.randomUUID(),
       timestamp: Date.now()
-    });
+    }));
   } catch (error) {
     log.error('Failed to send ping:', error);
   }
@@ -195,7 +223,7 @@ connect();
 
 // Export functions for use in other modules
 export const mcpConnection = {
-  port,
+  ws,
   requestPermission,
   
   // Expose reconnect function for manual intervention
