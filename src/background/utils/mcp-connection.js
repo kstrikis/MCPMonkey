@@ -1,5 +1,6 @@
 /* eslint-disable no-unused-vars */
 // import { addOwnCommands } from './init'; // Removed unused import
+import { mcpTools } from './mcp-tools';
 
 // Logging utility
 const LOG_PREFIX = '[MCP Connection]';
@@ -178,7 +179,7 @@ async function executeAction(action, data) {
   }
 
   const actions = {
-    getTabs: async () => await browser.runtime.sendMessage({ cmd: 'GetTabs', data }),
+    getTabs: async () => await mcpTools.getAllTabs(),
     createTab: async () => await browser.runtime.sendMessage({ cmd: 'CreateTab', data }),
     closeTabs: async () => await browser.runtime.sendMessage({ cmd: 'CloseTabs', data }),
     activateTab: async () => await browser.runtime.sendMessage({ cmd: 'ActivateTab', data }),
