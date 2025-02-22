@@ -19,6 +19,7 @@ const RECONNECT_DELAY = 5000; // 5 seconds
 // Connection state tracking
 let connectionAttempts = 0;
 let ws = null;
+let clientId = crypto.randomUUID(); // Generate a unique client ID for this connection
 
 // Store pending requests by their requestId
 const pendingRequests = new Map();
@@ -34,6 +35,13 @@ function connect() {
     ws.onopen = () => {
       log.info('Successfully connected to MCP server');
       connectionAttempts = 0; // Reset counter on successful connection
+      
+      // Send initial registration with our client ID
+      ws.send(JSON.stringify({
+        type: 'register',
+        clientId,
+        timestamp: Date.now()
+      }));
       
       // Send initial ping to verify connection
       sendPing();
@@ -68,6 +76,12 @@ function setupMessageHandlers() {
       
       if (!message || typeof message !== 'object') {
         log.error('Invalid message received:', message);
+        return;
+      }
+
+      // Check if this message is intended for our client
+      if (message.clientId && message.clientId !== clientId) {
+        log.debug('Ignoring message intended for different client:', message.clientId);
         return;
       }
 
@@ -163,8 +177,13 @@ function sendResponse(response) {
   }
 
   try {
-    log.debug('Sending response:', response);
-    ws.send(JSON.stringify(response));
+    // Always include our clientId in responses
+    const responseWithClientId = {
+      ...response,
+      clientId
+    };
+    log.debug('Sending response:', responseWithClientId);
+    ws.send(JSON.stringify(responseWithClientId));
   } catch (error) {
     log.error('Failed to send response:', error);
   }

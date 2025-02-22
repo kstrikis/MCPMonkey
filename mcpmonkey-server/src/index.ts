@@ -45,6 +45,7 @@ const wss = initWebSocketServer();
 
 // Track connected clients
 const clients: Set<WebSocket> = new Set();
+let mostRecentClient: WebSocket | null = null;  // Track most recent client
 
 // Track pending browser action requests
 const pendingBrowserActions = new Map<string, {
@@ -57,6 +58,7 @@ const pendingBrowserActions = new Map<string, {
 wss.on('connection', (ws) => {
   log.info('New WebSocket client connected');
   clients.add(ws);
+  mostRecentClient = ws;  // Set as most recent client
 
   ws.on('message', async (message) => {
     try {
@@ -82,6 +84,10 @@ wss.on('connection', (ws) => {
         } else {
           log.warn('Received response for unknown browser action request:', requestId);
         }
+      } else if (parsedMessage.type === 'register') {
+        // When a client registers, make it the most recent client
+        mostRecentClient = ws;
+        log.info('Client registered and set as most recent client');
       } else {
         // Forward other messages to all connected clients
         clients.forEach(client => {
@@ -92,7 +98,6 @@ wss.on('connection', (ws) => {
       }
     } catch (error) {
       log.error('Error handling WebSocket message:', error);
-      // Send error to the specific client that sent the message
       ws.send(JSON.stringify({
         type: 'error',
         message: 'Error processing message',
@@ -104,6 +109,11 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     log.info('WebSocket client disconnected');
     clients.delete(ws);
+    if (mostRecentClient === ws) {
+      // If the most recent client disconnected, set the next available client as most recent
+      mostRecentClient = clients.size > 0 ? Array.from(clients)[clients.size - 1] : null;
+      log.info('Most recent client disconnected, updated most recent client');
+    }
   });
 
   ws.on('error', (error) => {
@@ -281,11 +291,14 @@ server.tool(
         data: data || {}
       };
 
-      log.info(`Broadcasting browser action: ${action}`, actionMessage);
+      log.info(`Sending browser action to most recent client: ${action}`, actionMessage);
+
+      if (!mostRecentClient || mostRecentClient.readyState !== WebSocket.OPEN) {
+        throw new Error('No active browser extension client available');
+      }
 
       // Create a promise that will be resolved when we get the response
       const responsePromise = new Promise((resolve, reject) => {
-        // Set a timeout to reject the promise if we don't get a response
         const timeout = setTimeout(() => {
           pendingBrowserActions.delete(requestId);
           reject(new Error(`Browser action '${action}' timed out after 30 seconds`));
@@ -294,18 +307,8 @@ server.tool(
         pendingBrowserActions.set(requestId, { resolve, reject, timeout });
       });
 
-      // Broadcast to all clients
-      let clientCount = 0;
-      clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify(actionMessage));
-          clientCount++;
-        }
-      });
-
-      if (clientCount === 0) {
-        throw new Error('No connected browser extension clients available');
-      }
+      // Send only to most recent client
+      mostRecentClient.send(JSON.stringify(actionMessage));
 
       // Wait for the response
       const result = await responsePromise;
