@@ -45,6 +45,7 @@ const wss = initWebSocketServer();
 
 // Track connected clients
 const clients: Set<WebSocket> = new Set();
+let mostRecentClient: WebSocket | null = null;  // Track most recent client
 
 // Track pending browser action requests
 const pendingBrowserActions = new Map<string, {
@@ -57,6 +58,7 @@ const pendingBrowserActions = new Map<string, {
 wss.on('connection', (ws) => {
   log.info('New WebSocket client connected');
   clients.add(ws);
+  mostRecentClient = ws;  // Set as most recent client
 
   ws.on('message', async (message) => {
     try {
@@ -82,6 +84,10 @@ wss.on('connection', (ws) => {
         } else {
           log.warn('Received response for unknown browser action request:', requestId);
         }
+      } else if (parsedMessage.type === 'register') {
+        // When a client registers, make it the most recent client
+        mostRecentClient = ws;
+        log.info('Client registered and set as most recent client');
       } else {
         // Forward other messages to all connected clients
         clients.forEach(client => {
@@ -92,7 +98,6 @@ wss.on('connection', (ws) => {
       }
     } catch (error) {
       log.error('Error handling WebSocket message:', error);
-      // Send error to the specific client that sent the message
       ws.send(JSON.stringify({
         type: 'error',
         message: 'Error processing message',
@@ -104,6 +109,11 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     log.info('WebSocket client disconnected');
     clients.delete(ws);
+    if (mostRecentClient === ws) {
+      // If the most recent client disconnected, set the next available client as most recent
+      mostRecentClient = clients.size > 0 ? Array.from(clients)[clients.size - 1] : null;
+      log.info('Most recent client disconnected, updated most recent client');
+    }
   });
 
   ws.on('error', (error) => {
@@ -212,15 +222,65 @@ server.tool(
 );
 
 // Add a tool to handle browser tab operations
+const TabSchema = z.object({
+  id: z.number(),
+  windowId: z.number(),
+  url: z.string(),
+  title: z.string(),
+  active: z.boolean(),
+  pinned: z.boolean(),
+  index: z.number()
+});
+
 const browserTabsSchema = z.object({
-  action: z.string().describe("The browser action to perform"),
-  data: z.any().optional().describe("Optional data for the action")
+  action: z.enum(['getTabs', 'createTab', 'closeTabs', 'activateTab', 'duplicateTab'])
+    .describe("The browser action to perform"),
+  data: z.object({
+    // getTabs has no required data
+    // createTab data
+    url: z.string().url().optional(),
+    active: z.boolean().optional(),
+    windowId: z.number().optional(),
+    // closeTabs data
+    tabIds: z.array(z.number()).optional(),
+    // activateTab data
+    tabId: z.number().optional(),
+    // duplicateTab uses tabId as well
+  }).optional()
 });
 
 server.tool(
   "browserAction",
-  "Execute browser-related actions like getting tabs or creating new tabs",
-  { action: z.string().describe("The browser action to perform"), data: z.any().optional() },
+  `Execute browser-related actions for tab management.
+  
+  Available actions and their responses:
+  
+  1. getTabs: Returns an array of all open tabs
+     Response: TabSchema[]
+     Example: [{ id: 1, windowId: 1, url: "https://example.com", title: "Example", active: true, pinned: false, index: 0 }, ...]
+  
+  2. createTab: Creates a new tab
+     Parameters: { url?: string, active?: boolean, windowId?: number }
+     Response: TabSchema
+     Example: { id: 2, windowId: 1, url: "https://example.com", title: "Example", active: true, pinned: false, index: 1 }
+  
+  3. closeTabs: Closes specified tabs
+     Parameters: { tabIds: number[] }
+     Response: void (success) or throws error
+  
+  4. activateTab: Activates (focuses) a specific tab
+     Parameters: { tabId: number, windowId?: number }
+     Response: TabSchema
+     Example: { id: 1, windowId: 1, url: "https://example.com", title: "Example", active: true, pinned: false, index: 0 }
+  
+  5. duplicateTab: Duplicates a specific tab
+     Parameters: { tabId: number }
+     Response: TabSchema
+     Example: { id: 3, windowId: 1, url: "https://example.com", title: "Example", active: true, pinned: false, index: 2 }`,
+  { 
+    action: z.enum(['getTabs', 'createTab', 'closeTabs', 'activateTab', 'duplicateTab']),
+    data: z.object({}).passthrough()
+  },
   async ({ action, data }) => {
     try {
       const requestId = crypto.randomUUID();
@@ -231,11 +291,14 @@ server.tool(
         data: data || {}
       };
 
-      log.info(`Broadcasting browser action: ${action}`, actionMessage);
+      log.info(`Sending browser action to most recent client: ${action}`, actionMessage);
+
+      if (!mostRecentClient || mostRecentClient.readyState !== WebSocket.OPEN) {
+        throw new Error('No active browser extension client available');
+      }
 
       // Create a promise that will be resolved when we get the response
       const responsePromise = new Promise((resolve, reject) => {
-        // Set a timeout to reject the promise if we don't get a response
         const timeout = setTimeout(() => {
           pendingBrowserActions.delete(requestId);
           reject(new Error(`Browser action '${action}' timed out after 30 seconds`));
@@ -244,15 +307,34 @@ server.tool(
         pendingBrowserActions.set(requestId, { resolve, reject, timeout });
       });
 
-      // Broadcast to all clients
-      clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify(actionMessage));
-        }
-      });
+      // Send only to most recent client
+      mostRecentClient.send(JSON.stringify(actionMessage));
 
       // Wait for the response
       const result = await responsePromise;
+
+      // Validate the response based on the action type
+      try {
+        switch (action) {
+          case 'getTabs':
+            z.array(TabSchema).parse(result);
+            break;
+          case 'createTab':
+          case 'activateTab':
+          case 'duplicateTab':
+            TabSchema.parse(result);
+            break;
+          case 'closeTabs':
+            // closeTabs doesn't return data, just verify it's undefined/null
+            if (result !== undefined && result !== null) {
+              throw new Error('closeTabs should not return data');
+            }
+            break;
+        }
+      } catch (error) {
+        log.error(`Response validation failed for ${action}:`, error);
+        throw new Error(`Invalid response format for ${action}: ${error instanceof Error ? error.message : String(error)}`);
+      }
 
       return {
         content: [
