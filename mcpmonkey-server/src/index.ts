@@ -212,15 +212,65 @@ server.tool(
 );
 
 // Add a tool to handle browser tab operations
+const TabSchema = z.object({
+  id: z.number(),
+  windowId: z.number(),
+  url: z.string(),
+  title: z.string(),
+  active: z.boolean(),
+  pinned: z.boolean(),
+  index: z.number()
+});
+
 const browserTabsSchema = z.object({
-  action: z.string().describe("The browser action to perform"),
-  data: z.any().optional().describe("Optional data for the action")
+  action: z.enum(['getTabs', 'createTab', 'closeTabs', 'activateTab', 'duplicateTab'])
+    .describe("The browser action to perform"),
+  data: z.object({
+    // getTabs has no required data
+    // createTab data
+    url: z.string().url().optional(),
+    active: z.boolean().optional(),
+    windowId: z.number().optional(),
+    // closeTabs data
+    tabIds: z.array(z.number()).optional(),
+    // activateTab data
+    tabId: z.number().optional(),
+    // duplicateTab uses tabId as well
+  }).optional()
 });
 
 server.tool(
   "browserAction",
-  "Execute browser-related actions like getting tabs or creating new tabs",
-  { action: z.string().describe("The browser action to perform"), data: z.any().optional() },
+  `Execute browser-related actions for tab management.
+  
+  Available actions and their responses:
+  
+  1. getTabs: Returns an array of all open tabs
+     Response: TabSchema[]
+     Example: [{ id: 1, windowId: 1, url: "https://example.com", title: "Example", active: true, pinned: false, index: 0 }, ...]
+  
+  2. createTab: Creates a new tab
+     Parameters: { url?: string, active?: boolean, windowId?: number }
+     Response: TabSchema
+     Example: { id: 2, windowId: 1, url: "https://example.com", title: "Example", active: true, pinned: false, index: 1 }
+  
+  3. closeTabs: Closes specified tabs
+     Parameters: { tabIds: number[] }
+     Response: void (success) or throws error
+  
+  4. activateTab: Activates (focuses) a specific tab
+     Parameters: { tabId: number, windowId?: number }
+     Response: TabSchema
+     Example: { id: 1, windowId: 1, url: "https://example.com", title: "Example", active: true, pinned: false, index: 0 }
+  
+  5. duplicateTab: Duplicates a specific tab
+     Parameters: { tabId: number }
+     Response: TabSchema
+     Example: { id: 3, windowId: 1, url: "https://example.com", title: "Example", active: true, pinned: false, index: 2 }`,
+  { 
+    action: z.enum(['getTabs', 'createTab', 'closeTabs', 'activateTab', 'duplicateTab']),
+    data: z.object({}).passthrough()
+  },
   async ({ action, data }) => {
     try {
       const requestId = crypto.randomUUID();
@@ -245,14 +295,43 @@ server.tool(
       });
 
       // Broadcast to all clients
+      let clientCount = 0;
       clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN) {
           client.send(JSON.stringify(actionMessage));
+          clientCount++;
         }
       });
 
+      if (clientCount === 0) {
+        throw new Error('No connected browser extension clients available');
+      }
+
       // Wait for the response
       const result = await responsePromise;
+
+      // Validate the response based on the action type
+      try {
+        switch (action) {
+          case 'getTabs':
+            z.array(TabSchema).parse(result);
+            break;
+          case 'createTab':
+          case 'activateTab':
+          case 'duplicateTab':
+            TabSchema.parse(result);
+            break;
+          case 'closeTabs':
+            // closeTabs doesn't return data, just verify it's undefined/null
+            if (result !== undefined && result !== null) {
+              throw new Error('closeTabs should not return data');
+            }
+            break;
+        }
+      } catch (error) {
+        log.error(`Response validation failed for ${action}:`, error);
+        throw new Error(`Invalid response format for ${action}: ${error instanceof Error ? error.message : String(error)}`);
+      }
 
       return {
         content: [

@@ -180,11 +180,10 @@ async function executeAction(action, data) {
 
   const actions = {
     getTabs: async () => await mcpTools.getAllTabs(),
-    createTab: async () => await browser.runtime.sendMessage({ cmd: 'CreateTab', data }),
-    closeTabs: async () => await browser.runtime.sendMessage({ cmd: 'CloseTabs', data }),
-    activateTab: async () => await browser.runtime.sendMessage({ cmd: 'ActivateTab', data }),
-    reloadTab: async () => await browser.runtime.sendMessage({ cmd: 'ReloadTab', data }),
-    duplicateTab: async () => await browser.runtime.sendMessage({ cmd: 'DuplicateTab', data })
+    createTab: async () => await mcpTools.createTab(data),
+    closeTabs: async () => await mcpTools.closeTabs(data),
+    activateTab: async () => await mcpTools.activateTab(data),
+    duplicateTab: async () => await mcpTools.duplicateTab(data)
   };
 
   if (action in actions) {
