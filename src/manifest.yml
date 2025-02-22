@@ -21,6 +21,7 @@ browser_action:
   default_popup: popup/index.html
 background:
   scripts: []
+  persistent: true
 options_ui:
   page: options/index.html#settings
   open_in_tab: true
@@ -43,6 +44,7 @@ permissions:
   - clipboardWrite
   - contextMenus
   - cookies
+  - nativeMessaging
 commands:
   _execute_browser_action: {}
   toggleInjection:
