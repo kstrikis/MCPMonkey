@@ -10,6 +10,43 @@ const log = {
   debug: (...args) => console.debug(LOG_PREFIX, ...args),
 };
 
+// Store active port connections
+const activePorts = new Map();
+
+// Handle port connections from content scripts
+browser.runtime.onConnect.addListener((port) => {
+  if (port.name === 'pageStyleExtractor') {
+    const tabId = port.sender.tab.id;
+    activePorts.set(tabId, port);
+    
+    port.onDisconnect.addListener(() => {
+      activePorts.delete(tabId);
+      log.debug('Port disconnected for tab:', tabId);
+    });
+
+    port.onMessage.addListener((message) => {
+      if (message.command === 'styleData') {
+        log.debug('Received style data from tab:', tabId, message);
+        // Handle the style data - could emit an event or store it
+      } else if (message.command === 'testMessage') {
+        log.info('Received test message from tab:', tabId);
+        log.info('Test message data:', message.data);
+        
+        // Send acknowledgment back
+        port.postMessage({
+          command: 'testAck',
+          data: {
+            receivedTimestamp: message.data.timestamp,
+            ackTimestamp: Date.now()
+          }
+        });
+      }
+    });
+
+    log.debug('New port connection from tab:', tabId);
+  }
+});
+
 /**
  * Get information about all open tabs across all windows
  * @returns {Promise<Array<{
@@ -186,11 +223,56 @@ async function duplicateTab({ tabId }) {
   }
 }
 
+/**
+ * Request page styling information from a specific tab
+ * @param {Object} options
+ * @param {number} options.tabId - ID of the tab to get styles from
+ * @returns {Promise<Object>} The page style information
+ */
+async function getTabStyles({ tabId }) {
+  try {
+    if (!tabId) {
+      throw new Error('tabId is required');
+    }
+
+    const port = activePorts.get(tabId);
+    if (!port) {
+      throw new Error(`No active connection for tab ${tabId}`);
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Style extraction timed out'));
+      }, 5000);
+
+      const messageHandler = (message) => {
+        if (message.command === 'styleData') {
+          clearTimeout(timeout);
+          port.onMessage.removeListener(messageHandler);
+          
+          if (message.error) {
+            reject(new Error(message.error));
+          } else {
+            resolve(message.data);
+          }
+        }
+      };
+
+      port.onMessage.addListener(messageHandler);
+      port.postMessage({ command: 'getStyles' });
+    });
+  } catch (error) {
+    log.error('Failed to get tab styles:', error);
+    throw error;
+  }
+}
+
 // Export all MCP tools
 export const mcpTools = {
   getAllTabs,
   createTab,
   closeTabs,
   activateTab,
-  duplicateTab
+  duplicateTab,
+  getTabStyles
 }; 
