@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 // MCP Tools Implementation
 import browser from 'webextension-polyfill';
 
@@ -46,6 +47,52 @@ browser.runtime.onConnect.addListener((port) => {
     log.debug('New port connection from tab:', tabId);
   }
 });
+
+// Storage keys
+const STORAGE_KEYS = {
+  MESSAGE: 'styleExtractorMessage',
+  RESPONSE: 'styleExtractorResponse',
+  TEST_EXT: 'testFromExtension',
+  TEST_SCRIPT: 'testFromUserscript'
+};
+
+// Message types for communication
+const MESSAGE_TYPES = {
+  TEST_DATA: 'MCPMonkey:testData',
+  TEST_RESPONSE: 'MCPMonkey:testResponse'
+};
+
+/**
+ * Get a value from storage
+ * @param {string} key - Storage key
+ * @returns {Promise<any>} The stored value
+ */
+async function getValue(key) {
+  const result = await browser.storage.local.get(key);
+  return result[key];
+}
+
+/**
+ * Set a value in storage
+ * @param {string} key - Storage key
+ * @param {any} value - Value to store
+ */
+async function setValue(key, value) {
+  await browser.storage.local.set({ [key]: value });
+}
+
+/**
+ * Add a listener for storage changes
+ * @param {string} key - Storage key to watch
+ * @param {Function} callback - Callback function
+ */
+function addStorageListener(key, callback) {
+  browser.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === 'local' && changes[key]) {
+      callback(changes[key].newValue, changes[key].oldValue);
+    }
+  });
+}
 
 /**
  * Get information about all open tabs across all windows
@@ -235,37 +282,105 @@ async function getTabStyles({ tabId }) {
       throw new Error('tabId is required');
     }
 
-    const port = activePorts.get(tabId);
-    if (!port) {
-      throw new Error(`No active connection for tab ${tabId}`);
-    }
+    // Send request through GM value
+    await browser.tabs.executeScript(tabId, {
+      code: `
+        GM_setValue('${STORAGE_KEYS.MESSAGE}', JSON.stringify({
+          command: 'getStyles',
+          timestamp: Date.now()
+        }));
+      `
+    });
 
+    // Wait for response
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error('Style extraction timed out'));
       }, 5000);
 
-      const messageHandler = (message) => {
-        if (message.command === 'styleData') {
-          clearTimeout(timeout);
-          port.onMessage.removeListener(messageHandler);
-          
-          if (message.error) {
-            reject(new Error(message.error));
+      // Listen for storage changes
+      const listener = async (newValue) => {
+        if (!newValue) return;
+        
+        try {
+          const response = JSON.parse(newValue);
+          if (response.error) {
+            reject(new Error(response.error));
           } else {
-            resolve(message.data);
+            resolve(response.data);
           }
+          
+          // Clean up
+          await browser.storage.local.remove(STORAGE_KEYS.RESPONSE);
+          browser.storage.onChanged.removeListener(listener);
+          clearTimeout(timeout);
+        } catch (error) {
+          reject(error);
         }
       };
 
-      port.onMessage.addListener(messageHandler);
-      port.postMessage({ command: 'getStyles' });
+      addStorageListener(STORAGE_KEYS.RESPONSE, listener);
     });
   } catch (error) {
     log.error('Failed to get tab styles:', error);
     throw error;
   }
 }
+
+/**
+ * Test communication functionality
+ */
+async function testStorage() {
+  try {
+    log.info('Starting extension communication test...');
+    
+    // Inject content script to handle communication
+    const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+    if (!tabs.length) {
+      throw new Error('No active tab found');
+    }
+    
+    const tabId = tabs[0].id;
+    await browser.tabs.executeScript(tabId, {
+      code: `
+        // Listen for messages from userscript
+        window.addEventListener('message', function(event) {
+          if (event.data.type === '${MESSAGE_TYPES.TEST_DATA}') {
+            console.log('Content script received from userscript:', event.data);
+            // Forward to extension
+            browser.runtime.sendMessage(event.data);
+            
+            // Send response back to userscript
+            window.postMessage({
+              type: '${MESSAGE_TYPES.TEST_RESPONSE}',
+              data: {
+                received: event.data,
+                timestamp: Date.now()
+              }
+            }, '*');
+          }
+        });
+        
+        console.log('Content script injected and listening...');
+      `
+    });
+    
+    // Listen for messages from content script
+    browser.runtime.onMessage.addListener((message) => {
+      if (message.type === MESSAGE_TYPES.TEST_DATA) {
+        log.info('Extension received from userscript:', message);
+      }
+    });
+    
+    log.info('Extension test initialized...');
+    
+  } catch (error) {
+    log.error('Extension test failed:', error);
+  }
+}
+
+// Run test on startup
+testStorage();
 
 // Export all MCP tools
 export const mcpTools = {
@@ -274,5 +389,12 @@ export const mcpTools = {
   closeTabs,
   activateTab,
   duplicateTab,
-  getTabStyles
+  getTabStyles,
+  // Export storage utilities for other modules
+  storage: {
+    getValue,
+    setValue,
+    addStorageListener,
+    STORAGE_KEYS
+  }
 }; 
