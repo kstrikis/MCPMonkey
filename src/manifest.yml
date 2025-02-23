@@ -70,5 +70,5 @@ minimum_chrome_version: '61.0'
 
 browser_specific_settings:
   gecko:
-    id: '{aecec67f-0d10-4fa7-b7c7-609a2db280cf}'
+    id: '{3292460b-e420-4c96-a8fd-a7cccf0efa5e}'
     strict_min_version: '58.0'
