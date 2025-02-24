@@ -786,7 +786,7 @@
                 
             // Text align
             case normalizedProp === 'text-align':
-                return ['left', 'right', 'center', 'justify'].includes(value);
+                return ['left', 'right', 'center', 'justify', 'start'].includes(value);
                 
             // Overflow
             case /^overflow(-[xy])?$/i.test(normalizedProp):
@@ -813,7 +813,10 @@
                     return ['nowrap', 'wrap', 'wrap-reverse'].includes(value);
                 }
                 return true; // Other flex properties have complex validation
-                
+            // Max-width and max-height
+            case normalizedProp === 'max-width':
+            case normalizedProp === 'max-height':
+                return isValidNumericValue(value) || value === 'none';
             // Default case
             default:
                 return true; // Accept unknown properties but log them
@@ -891,6 +894,39 @@
                 const prop = element.style[i];
                 data.styles.computedStyles[identifier][prop] = element.style[prop]; // Inline styles override computed
             }
+        }
+
+        // *** INFER INTERACTIVE STYLES HERE ***
+        const inferredHoverStyles = {};
+
+        if (element.tagName === 'A') {
+            // If it's a link, and doesn't already have an underline, add one
+            if (computedStyle.textDecorationLine !== 'underline') {
+                inferredHoverStyles['text-decoration'] = 'underline';
+            }
+
+            // Darken the color slightly, if it's not too dark already
+            const color = computedStyle.color;
+            if (color.startsWith('rgb')) {
+                const darkenedColor = darkenColor(color);
+                if (darkenedColor !== color) { // Only add if the color actually changed
+                    inferredHoverStyles.color = darkenedColor;
+                }
+            }
+        }
+
+        //If it has a background color, darken it
+        const backgroundColor = computedStyle.backgroundColor;
+        if(backgroundColor.startsWith('rgb')){
+            const darkenedBackgroundColor = darkenColor(backgroundColor);
+            if(darkenedBackgroundColor !== backgroundColor){
+                inferredHoverStyles.backgroundColor = darkenedBackgroundColor;
+            }
+        }
+
+        // Add the inferred styles to computedStyles, if any
+        if (Object.keys(inferredHoverStyles).length > 0) {
+            data.styles.computedStyles[`${identifier}:hover`] = inferredHoverStyles;
         }
 
         // Process pseudo-elements
@@ -1037,42 +1073,101 @@
     // Add a new function to handle interactive states
     function processInteractiveStates(element, selector, allStyles) {
         const states = [':hover', ':focus', ':active'];
-        const baseStyles = getComputedStyles(element); // Get base styles *before* simulating
+        const baseStyles = getComputedStyles(element); // Get base styles *before* any changes
+
+        console.log(`%cProcessing interactive states for: ${selector}`, 'color: blue; font-weight: bold;'); // Use styling for clarity
 
         states.forEach(state => {
+            console.log(`%c  Processing state: ${state}`, 'color: green;');
             try {
-                // Simulate the state by temporarily adding a class
-                const tempClass = `temp-${state.substring(1)}`;
+                // 1. Create a unique temporary class.
+                const tempClass = `temp-${state.substring(1)}-${generateUUID()}`;
                 element.classList.add(tempClass);
+                console.log(`    Added temp class: ${tempClass}`);
 
-                // Use a CSS rule to apply the state
-                const style = document.createElement('style');
-                style.textContent = `${selector}.${tempClass}${state} { }`;
-                document.head.appendChild(style);
+                // 2. Create an initial temporary stylesheet *without* any styles.
+                const initialStyle = document.createElement('style');
+                initialStyle.textContent = `${selector}.${tempClass}${state} {}`;
+                document.head.appendChild(initialStyle);
+                console.log(`    Added initial stylesheet: ${initialStyle.textContent}`);
 
-                const stateStyles = getComputedStyles(element);
+                // 3. Get the computed styles *after* applying the temporary class.
+                const intermediateStyles = getComputedStyles(element);
+                console.log(`    intermediateStyles:`, intermediateStyles);
 
-                // Remove the temporary class and style
-                element.classList.remove(tempClass);
-                document.head.removeChild(style);
+                // 4.  Remove the initial temporary style.
+                document.head.removeChild(initialStyle);
+                console.log(`    Removed initial stylesheet`);
 
-                // Filter and store *only different* styles
-                const diffStyles = {};
-                for (const prop in stateStyles) {
-                    if (stateStyles.hasOwnProperty(prop) && stateStyles[prop] !== baseStyles[prop]) {
-                        diffStyles[prop] = stateStyles[prop];
+                // 5. Determine which styles have changed.
+                const changedStyles = {};
+                for (const prop in intermediateStyles) {
+                    if (intermediateStyles.hasOwnProperty(prop) && intermediateStyles[prop] !== baseStyles[prop]) {
+                        changedStyles[prop] = baseStyles[prop]; // Store the *original* value
                     }
                 }
+                console.log(`    changedStyles:`, changedStyles);
 
-                if (Object.keys(diffStyles).length > 0) {
-                    const stateSelector = `${selector}${state}`;
-                    allStyles.computedStyles[stateSelector] = diffStyles;
+                // 6.  Create a *second* temporary stylesheet if needed.
+                if (Object.keys(changedStyles).length > 0) {
+                    const finalStyle = document.createElement('style');
+                    let styleText = `${selector}.${tempClass}${state} { outline: none !important; `; // Always include outline
+                    for (const prop in changedStyles) {
+                        styleText += `${prop}: ${changedStyles[prop]} !important; `;
+                    }
+                    styleText += '}';
+                    finalStyle.textContent = styleText;
+                    document.head.appendChild(finalStyle);
+                    console.log(`    Added final stylesheet: ${finalStyle.textContent}`);
+
+                    // 7. Get the computed styles *again*.
+                    const finalStateStyles = getComputedStyles(element);
+                    console.log(`    finalStateStyles:`, finalStateStyles);
+
+                    // 8. Remove the temporary class and the second stylesheet.
+                    element.classList.remove(tempClass);
+                    document.head.removeChild(finalStyle);
+                    console.log(`    Removed temp class and final stylesheet`);
+
+                    // 9. Store only the styles that are *different* from the base styles.
+                    const diffStyles = {};
+                    for (const prop in finalStateStyles) {
+                        if (finalStateStyles.hasOwnProperty(prop) && finalStateStyles[prop] !== baseStyles[prop]) {
+                            diffStyles[prop] = finalStateStyles[prop];
+                        }
+                    }
+                    console.log(`    diffStyles:`, diffStyles);
+
+                    if (Object.keys(diffStyles).length > 0) {
+                        const stateSelector = `${selector}${state}`;
+                        allStyles.computedStyles[stateSelector] = diffStyles;
+                        console.log(`%c    Stored styles for ${stateSelector}:`, 'color: orange;', diffStyles);
+                    }
+                } else {
+                    // If no styles changed, we don't need to do anything.
+                    element.classList.remove(tempClass);
+                    console.log(`    No styles changed, removed temp class`);
                 }
 
             } catch (e) {
                 console.warn(`Error processing state ${state} for ${selector}:`, e);
             }
         });
+    }
+
+    // Helper function to darken a color (RGB only)
+    function darkenColor(rgbColor, factor = 0.8) {
+        if (!rgbColor.startsWith('rgb')) return rgbColor; // Return original if not RGB
+
+        try {
+            let [r, g, b] = rgbColor.substring(rgbColor.indexOf('(') + 1, rgbColor.indexOf(')')).split(',').map(Number);
+            r = Math.max(0, Math.floor(r * factor));
+            g = Math.max(0, Math.floor(g * factor));
+            b = Math.max(0, Math.floor(g * factor));
+            return `rgb(${r}, ${g}, ${b})`;
+        } catch (error){
+            return rgbColor;
+        }
     }
 
     // Listen for messages from extension
