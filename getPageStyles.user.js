@@ -76,12 +76,12 @@
                         const style = document.createElement('style');
                         style.textContent = response.responseText;
                         document.head.appendChild(style);
-
+                        
                         // Process the rules
                         const sheet = style.sheet;
                         // Pass allStyles (which is data.styles)
                         processStylesheetRules(sheet, allStyles);
-
+                        
                         // Remove the temporary style element
                         document.head.removeChild(style);
                         resolve();
@@ -586,26 +586,26 @@
 
             const allElements = document.querySelectorAll(initialSelector); // More targeted!
             data.styles.metadata.stats.totalElementsScanned = allElements.length;
-
+            
             // Get viewport dimensions
             const viewportHeight = window.innerHeight;
             const viewportWidth = window.innerWidth;
-
+            
             // Sort elements by importance (viewport visibility and role)
             const importantElements = Array.from(allElements)
                 .filter(el => {
                     // --- VIEWPORT CHECK FIRST ---
                     const rect = el.getBoundingClientRect();
-                    const isInViewport = !(rect.bottom < 0 ||
+                    const isInViewport = !(rect.bottom < 0 || 
                                          rect.top > viewportHeight ||
-                                         rect.right < 0 ||
+                                         rect.right < 0 || 
                                          rect.left > viewportWidth);
-
+                    
                     if (!isInViewport) {
                         data.styles.metadata.stats.filteredOut++;
                         return false;
                     }
-
+                    
                     return isImportantElement(el); // Now called *after* viewport check
                 })
                 .sort((a, b) => {
@@ -818,7 +818,7 @@
                     return ['nowrap', 'wrap', 'wrap-reverse'].includes(value);
                 }
                 return true; // Other flex properties have complex validation
-
+                
             // Default case
             default:
                 return true; // Accept unknown properties but log them
@@ -1046,16 +1046,16 @@
 
         // Helper function to extract and store changed styles
         function storeChangedStyles(state, newStyles) {
-            const diffStyles = {};
+                const diffStyles = {};
             for (const prop in newStyles) {
                 if (newStyles.hasOwnProperty(prop) && newStyles[prop] !== baseStyles[prop]) {
                     diffStyles[prop] = newStyles[prop];
+                    }
                 }
-            }
 
-            if (Object.keys(diffStyles).length > 0) {
-                const stateSelector = `${selector}${state}`;
-                allStyles.computedStyles[stateSelector] = diffStyles;
+                if (Object.keys(diffStyles).length > 0) {
+                    const stateSelector = `${selector}${state}`;
+                    allStyles.computedStyles[stateSelector] = diffStyles;
                 console.log(`%c    Stored styles for ${stateSelector}:`, 'color: orange;', diffStyles);
             } else if (state === ':hover' && element.tagName === 'A') {
                 // *** Fallback for link hover ***
