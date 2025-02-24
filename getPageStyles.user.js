@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Page Style Extractor
 // @namespace    https://github.com/kstrikis/MCPMonkey
-// @version      0.3
+// @version      0.4
 // @description  Extract complete styling information from a webpage for AI-based cloning
 // @author       MCPMonkey
 // @match        *://*/*
@@ -13,6 +13,9 @@
 
 (function() {
     'use strict';
+
+    // Initialize data object at the top level
+    let data = null; // We'll initialize this when processing starts
 
     // Log environment info
     console.log('Userscript environment:', {
@@ -32,6 +35,15 @@
     const MESSAGE_TYPES = {
         STYLE_REQUEST: 'MM_ext:styleRequest',
         STYLE_RESPONSE: 'MM_us:styleResponse'
+    };
+    // Configuration limits - **DEFINE HERE**
+    const LIMITS = {
+        MAX_ELEMENTS: 500,
+        MAX_RULES_PER_SELECTOR: 20,
+        MAX_MEDIA_QUERIES: 20,
+        MAX_PSEUDO_ELEMENTS: 10,
+        MAX_ANIMATIONS: 5,
+        MAX_SELECTOR_SPECIFICITY: 2
     };
 
     // Track processed message IDs to prevent loops
@@ -53,7 +65,7 @@
      * Process an external stylesheet using GM_xmlhttpRequest to bypass CORS
      * @returns {Promise} Promise that resolves when stylesheet is processed
      */
-    function processExternalStylesheet(href, allStyles, sheetIndex) {
+    function processExternalStylesheet(href, allStyles) {
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: 'GET',
@@ -64,22 +76,35 @@
                         const style = document.createElement('style');
                         style.textContent = response.responseText;
                         document.head.appendChild(style);
-                        
+
                         // Process the rules
                         const sheet = style.sheet;
+                        // Pass allStyles (which is data.styles)
                         processStylesheetRules(sheet, allStyles);
-                        
+
                         // Remove the temporary style element
                         document.head.removeChild(style);
                         resolve();
                     } catch (e) {
                         console.warn('Error processing external stylesheet:', href, e);
-                        resolve(); // Resolve anyway to continue processing
+                        // Instead of resolving, add to errors
+                        allStyles.errors.push({
+                            type: 'external_stylesheet_fetch',
+                            message: e.message,
+                            url: href
+                        });
+                        resolve(); // Resolve to continue processing other stylesheets
                     }
                 },
                 onerror: function(error) {
                     console.warn('Failed to fetch external stylesheet:', href, error);
-                    resolve(); // Resolve anyway to continue processing
+                    // Add to errors
+                    allStyles.errors.push({
+                        type: 'external_stylesheet_fetch',
+                        message: 'Failed to fetch',
+                        url: href
+                    });
+                    resolve(); // Resolve to continue processing other stylesheets
                 }
             });
         });
@@ -88,32 +113,137 @@
     /**
      * Process all rules in a stylesheet
      */
-    function processStylesheetRules(sheet, allStyles) {
+    async function processStylesheetRules(sheet, allStyles) {
         try {
+            // Skip cross-origin stylesheets that we can't access directly
+            if (!sheet.cssRules) {
+                const href = sheet.href;
+                if (href) {
+                    // *** IMMEDIATE PROCESSING OF CROSS-ORIGIN STYLESHEETS ***
+                    await processExternalStylesheet(href, allStyles); // Use await here
+                }
+                return;
+            }
+
             const rules = Array.from(sheet.cssRules || []);
+            const processedSelectors = new Set();
+
             rules.forEach(rule => {
                 if (rule instanceof CSSStyleRule) {
-                    // Store *only* global styles that have !important
-                    if (rule.style.cssText.includes('!important')) {
-                        allStyles.importantRules[rule.selectorText] = rule.cssText;
+                    // Skip if we've already processed this selector
+                    if (processedSelectors.has(rule.selectorText)) return;
+                    
+                    // Skip overly complex selectors
+                    if (rule.selectorText.split(',').length > 2 || // Max 2 comma-separated selectors
+                        rule.selectorText.split(/[\s>+~]/).length > 3) { // Max 3 combinators
+                        return;
                     }
-                } else if (rule instanceof CSSMediaRule) {
-                    allStyles.mediaQueries.push({
-                        query: rule.conditionText,
-                        rules: Array.from(rule.cssRules).map(r => r.cssText)
+
+                    // Store only if the selector matches any important elements
+                    const matchesImportant = Array.from(document.querySelectorAll(rule.selectorText))
+                        .some(el => isImportantElement(el));
+
+                    if (matchesImportant) {
+                        processedSelectors.add(rule.selectorText);
+                        
+                        // Clean up the styles
+                        const cleanedStyles = {};
+                        let ruleCount = 0;
+                        
+                        for (let i = 0; i < rule.style.length && ruleCount < LIMITS.MAX_RULES_PER_SELECTOR; i++) {
+                            const prop = rule.style[i];
+                            const value = rule.style.getPropertyValue(prop);
+                            
+                            // Skip default values
+                            if (value === 'initial' || value === 'none' || value === 'auto') continue;
+                            
+                            // Validate and store
+                            if (isValidCSSProperty(prop)) {
+                                const validatedValue = isValidCSSValue(prop, value);
+                                if (validatedValue !== false) {
+                                    cleanedStyles[prop] = validatedValue;
+                                    ruleCount++;
+                                }
+                            }
+                        }
+                        
+                        if (Object.keys(cleanedStyles).length > 0) {
+                            allStyles.importantRules[rule.selectorText] = cleanedStyles;
+                            data.styles.metadata.stats.rulesProcessed++;
+                        }
+                    }
+                } else if (rule instanceof CSSMediaRule && 
+                          rule.conditionText.includes('screen') &&
+                          allStyles.mediaQueries.length < LIMITS.MAX_MEDIA_QUERIES) {
+                    // Normalize the query
+                    const query = rule.conditionText.toLowerCase()
+                        .replace(/\s+/g, ' ')
+                        .replace(/0px/g, '0')
+                        .trim();
+                    
+                    // Extract rules and add them
+                    const mediaRules = [];
+                    Array.from(rule.cssRules).forEach(r => {
+                        if (r instanceof CSSStyleRule) {
+                            // Apply similar filtering as for regular rules
+                            const matchesImportant = Array.from(document.querySelectorAll(r.selectorText))
+                                .some(el => isImportantElement(el));
+                            
+                            if (matchesImportant) {
+                                const cleanedStyles = {};
+                                let ruleCount = 0;
+                                
+                                for (let i = 0; i < r.style.length && ruleCount < LIMITS.MAX_RULES_PER_SELECTOR; i++) {
+                                    const prop = r.style[i];
+                                    const value = r.style.getPropertyValue(prop);
+                                    
+                                    if (isValidCSSProperty(prop)) {
+                                        const validatedValue = isValidCSSValue(prop, value);
+                                        if (validatedValue !== false) {
+                                            cleanedStyles[prop] = validatedValue;
+                                            ruleCount++;
+                                        }
+                                    }
+                                }
+                                
+                                if (Object.keys(cleanedStyles).length > 0) {
+                                    mediaRules.push({
+                                        selector: r.selectorText,
+                                        styles: cleanedStyles
+                                    });
+                                }
+                            }
+                        }
                     });
+                    
+                    // Always call addMediaQueryRule, even if mediaRules is empty
+                    addMediaQueryRule(query, mediaRules);
                 } else if (rule instanceof CSSKeyframesRule) {
-                    allStyles.animations[rule.name] = {
-                        name: rule.name,
-                        keyframes: Array.from(rule.cssRules).map(kf => ({
-                            keyText: kf.keyText,
-                            style: kf.style.cssText
-                        }))
-                    };
+                    // Only store keyframe animations that are actually used
+                    const isUsed = document.querySelector(`[style*="animation-name: ${rule.name}"]`) ||
+                                 document.querySelector(`[style*="animation: ${rule.name}"]`);
+                    
+                    if (isUsed) {
+                        allStyles.animations[rule.name] = {
+                            name: rule.name,
+                            keyframes: Array.from(rule.cssRules).map(kf => ({
+                                keyText: kf.keyText,
+                                style: Object.fromEntries(
+                                    Array.from(kf.style).filter(prop => isValidCSSProperty(prop))
+                                        .map(prop => [prop, kf.style.getPropertyValue(prop)])
+                                )
+                            }))
+                        };
+                    }
                 }
             });
         } catch (e) {
-            console.warn('Error processing stylesheet rules:', e);
+            if (!allStyles.errors) allStyles.errors = [];
+            allStyles.errors.push({
+                type: 'stylesheet_processing',
+                message: e.message,
+                source: sheet.href || 'inline' // More context in error
+            });
         }
     }
 
@@ -200,6 +330,8 @@
         document.body.appendChild(tempElement);
         const defaultComputedStyle = window.getComputedStyle(tempElement);
 
+        const backgroundImageUrls = []; // Store URLs here
+
         for (let i = 0; i < computedStyle.length; i++) {
             const prop = computedStyle[i];
 
@@ -247,9 +379,24 @@
                 }
             }
 
+            if (prop === 'background-image' && value !== 'none') {
+                // Extract URL(s) from the value
+                const urls = value.match(/url\(['"]?(.*?)['"]?\)/g);
+                if (urls) {
+                    urls.forEach(url => {
+                        backgroundImageUrls.push(url.slice(4, -1).replace(/['"]/g, ''));
+                    });
+                }
+            }
 
             targetObject[prop] = value;
         }
+
+        // Add backgroundImageUrls *after* the loop
+        if (backgroundImageUrls.length > 0) {
+            targetObject.backgroundImageUrls = backgroundImageUrls;
+        }
+
         document.body.removeChild(tempElement); // Clean up
     }
 
@@ -383,144 +530,549 @@
      */
     async function getRealPageStyling() {
         try {
-            const allStyles = {
-                computedStyles: {},      // Focus on computed styles
-                pseudoElements: {},       // Still useful
-                animations: {},           // Keep, but could be simplified
-                colorScheme: {},          // Keep
-                typography: {},           // Keep
-                mediaQueries: [],         // Keep
-                importantRules: {},       // Keep !important rules from global styles
-                customProperties: {},     // Keep
-                layoutInfo: {},           // Keep
-                errors: []                // Keep
-            };
-
-            // Get all stylesheets, including external ones
-            const styleSheets = Array.from(document.styleSheets);
-            
-            // Process stylesheets in parallel
-            const externalSheetPromises = [];
-            
-            // Process each stylesheet
-            styleSheets.forEach((sheet, sheetIndex) => {
-                try {
-                    // For external stylesheets that might be CORS-restricted
-                    if (sheet.href) {
-                        // Queue this for separate XHR request to bypass CORS
-                        externalSheetPromises.push(processExternalStylesheet(sheet.href, allStyles, sheetIndex));
-                    } else {
-                        // Try to access rules directly for same-origin stylesheets
-                        try {
-                            processStylesheetRules(sheet, allStyles);
-                        } catch (e) {
-                            if (e.name === 'SecurityError') {
-                                allStyles.errors.push({
-                                    type: 'stylesheet',
-                                    message: 'CORS restriction on stylesheet',
-                                    href: sheet.href
-                                });
-                            } else {
-                                throw e;
-                            }
+            // Initialize fresh data object for this extraction
+            data = {
+                styles: {
+                    computedStyles: {},      // Essential computed styles (non-inherited)
+                    pseudoElements: {},      // Pseudo-element styles with actual content
+                    animations: {},          // Only used keyframe animations
+                    colorScheme: {},         // Color theme information
+                    typography: {},          // Typography system
+                    mediaQueries: [],        // Deduplicated and normalized media queries
+                    importantRules: {},      // Critical and !important rules
+                    customProperties: {},    // CSS variables in use
+                    layoutInfo: {},          // Layout structure
+                    errors: [],              // Error tracking
+                    metadata: {              // Metadata section
+                        extractedAt: Date.now(),
+                        url: window.location.href,
+                        viewport: {
+                            width: window.innerWidth,
+                            height: window.innerHeight
+                        },
+                        userAgent: navigator.userAgent,
+                        stats: {
+                            totalElementsScanned: 0,
+                            elementsProcessed: 0,
+                            rulesProcessed: 0,
+                            filteredOut: 0
                         }
                     }
-                } catch (e) {
-                    allStyles.errors.push({
-                        type: 'stylesheet',
-                        message: e.message,
-                        href: sheet.href
-                    });
                 }
-            });
+            };
 
-            // Wait for all external stylesheets to be processed
-            await Promise.all(externalSheetPromises);
+            // Configuration limits
+            const LIMITS = {
+                MAX_ELEMENTS: 500,
+                MAX_RULES_PER_SELECTOR: 20,
+                MAX_MEDIA_QUERIES: 20,
+                MAX_PSEUDO_ELEMENTS: 10,
+                MAX_ANIMATIONS: 5,
+                MAX_SELECTOR_SPECIFICITY: 2
+            };
 
-            // Get all elements and their computed/inline styles
-            const allElements = document.querySelectorAll('*');
-            allElements.forEach(element => {
+            // --- OPTIMIZED ELEMENT SELECTION ---
+            const importantTags = ['HEADER', 'FOOTER', 'NAV', 'MAIN', 'ARTICLE', 'SECTION', 'ASIDE', 'FORM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BUTTON', 'INPUT', 'TEXTAREA', 'SELECT', 'IMG', 'A'];
+            const importantPatterns = [
+                'header', 'footer', 'nav', 'main', 'content',
+                'container', 'wrapper', 'layout', 'banner', 'hero',
+                'product', 'item', 'card', 'list', 'grid',
+                '-root', '-main', '-primary', '-container', '-item'
+            ];
+
+            // Combine for a more targeted initial selector
+            const initialSelector = importantTags.join(',') + ',' +
+                                   importantPatterns.map(p => `[class*="${p}"], [id*="${p}"]`).join(',');
+
+            const allElements = document.querySelectorAll(initialSelector); // More targeted!
+            data.styles.metadata.stats.totalElementsScanned = allElements.length;
+
+            // Get viewport dimensions
+            const viewportHeight = window.innerHeight;
+            const viewportWidth = window.innerWidth;
+
+            // Sort elements by importance (viewport visibility and role)
+            const importantElements = Array.from(allElements)
+                .filter(el => {
+                    // --- VIEWPORT CHECK FIRST ---
+                    const rect = el.getBoundingClientRect();
+                    const isInViewport = !(rect.bottom < 0 ||
+                                         rect.top > viewportHeight ||
+                                         rect.right < 0 ||
+                                         rect.left > viewportWidth);
+
+                    if (!isInViewport) {
+                        data.styles.metadata.stats.filteredOut++;
+                        return false;
+                    }
+
+                    return isImportantElement(el); // Now called *after* viewport check
+                })
+                .sort((a, b) => {
+                    const aRect = a.getBoundingClientRect();
+                    const bRect = b.getBoundingClientRect();
+                    
+                    // Calculate how much of the element is in the viewport
+                    const aVisibleArea = Math.min(aRect.bottom, viewportHeight) - Math.max(aRect.top, 0);
+                    const bVisibleArea = Math.min(bRect.bottom, viewportHeight) - Math.max(bRect.top, 0);
+                    
+                    // Sort by visible area (larger first)
+                    return bVisibleArea - aVisibleArea;
+                })
+                .slice(0, LIMITS.MAX_ELEMENTS);
+
+            // Process stylesheets, focusing only on rules that affect our important elements
+            const styleSheets = Array.from(document.styleSheets);
+            const processedSelectors = new Set();
+            
+            // Use Promise.all for concurrent stylesheet processing
+            await Promise.all(styleSheets.map(async sheet => { // Use async here
+                await processStylesheetRules(sheet, data.styles); // Await processStylesheetRules
+            }));
+
+            // Process important elements
+            importantElements.forEach(element => {
                 try {
-                    processElementStyles(element, allStyles);
+                    processElement(element, getElementIdentifier(element));
+                    data.styles.metadata.stats.elementsProcessed++;
                 } catch (e) {
-                    allStyles.errors.push({
-                        type: 'element',
+                    data.styles.errors.push({
+                        type: 'element_processing',
                         message: e.message,
                         element: getElementIdentifier(element)
                     });
                 }
             });
 
-            // --- MutationObserver Setup ---
-            const observer = new MutationObserver(mutations => {
-                mutations.forEach(mutation => {
-                    if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
-                        const element = mutation.target;
-                        const identifier = getElementIdentifier(element);
-                        // Re-process styles for this element
-                        allStyles.computedStyles[identifier] = {}; // Clear previous styles
-                        const computedStyle = window.getComputedStyle(element);
-                        filterAndStoreComputedStyles(element, computedStyle, allStyles.computedStyles[identifier]);
+            // Extract theme information
+            extractColorScheme(data.styles);
+            extractTypography(data.styles);
+            extractLayoutInfo(data.styles);
+            extractCustomProperties(data.styles); // Extract custom properties
 
-                        // Merge inline styles (again, as they might have changed)
-                        if (element.style.length) {
-                            for (let i = 0; i < element.style.length; i++) {
-                                const prop = element.style[i];
-                                allStyles.computedStyles[identifier][prop] = element.style[prop];
-                            }
-                        }
-                    }
-                });
+            // Clean up and optimize
+            Object.keys(data.styles).forEach(key => {
+                const value = data.styles[key];
+                if (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) {
+                    delete data.styles[key];
+                }
             });
 
-            // Start observing all changes in the document
-            observer.observe(document, {
-                attributes: true,
-                attributeFilter: ['style'], // Only observe 'style' attribute changes
-                subtree: true // Observe all descendants of the document
-            });
-
-            try {
-                extractColorScheme(allStyles);
-            } catch (e) {
-                allStyles.errors.push({
-                    type: 'colorScheme',
-                    message: e.message
-                });
-            }
-
-            try {
-                extractTypography(allStyles);
-            } catch (e) {
-                allStyles.errors.push({
-                    type: 'typography',
-                    message: e.message
-                });
-            }
-
-            try {
-                extractLayoutInfo(allStyles);
-            } catch (e) {
-                allStyles.errors.push({
-                    type: 'layout',
-                    message: e.message
-                });
-            }
-
-            try {
-                extractCustomProperties(allStyles);
-            } catch (e) {
-                allStyles.errors.push({
-                    type: 'customProperties',
-                    message: e.message
-                });
-            }
-
-            return allStyles;
+            return data.styles;
         } catch (error) {
-            console.error('Error extracting page styles:', error);
+            console.error('Fatal error extracting page styles:', error);
             throw error;
         }
+    }
+
+    function isValidCSSProperty(property) {
+        // Comprehensive whitelist of commonly used and important CSS properties
+        const validProperties = [
+            // Layout
+            "display", "position", "top", "right", "bottom", "left", "float", "clear",
+            "width", "height", "min-width", "max-width", "min-height", "max-height",
+            "margin", "margin-top", "margin-right", "margin-bottom", "margin-left",
+            "padding", "padding-top", "padding-right", "padding-bottom", "padding-left",
+            
+            // Box model
+            "border", "border-width", "border-style", "border-color",
+            "border-top", "border-right", "border-bottom", "border-left",
+            "border-radius", "box-shadow", "box-sizing", "outline",
+            
+            // Typography
+            "color", "font-family", "font-size", "font-weight", "font-style",
+            "line-height", "letter-spacing", "text-align", "text-decoration",
+            "text-transform", "white-space", "word-break", "word-wrap",
+            
+            // Visual
+            "background", "background-color", "background-image",
+            "background-position", "background-repeat", "background-size",
+            "opacity", "visibility", "z-index", "overflow", "overflow-x", "overflow-y",
+            
+            // Flexbox
+            "flex", "flex-basis", "flex-direction", "flex-flow", "flex-grow",
+            "flex-shrink", "flex-wrap", "justify-content", "align-items",
+            "align-content", "align-self", "order",
+            
+            // Grid
+            "grid", "grid-template-columns", "grid-template-rows",
+            "grid-template-areas", "grid-area", "grid-column", "grid-row",
+            "gap", "grid-gap", "grid-column-gap", "grid-row-gap",
+            
+            // Transforms & Transitions
+            "transform", "transform-origin", "transition", "transition-property",
+            "transition-duration", "transition-timing-function", "transition-delay",
+            
+            // Animation
+            "animation", "animation-name", "animation-duration",
+            "animation-timing-function", "animation-delay", "animation-iteration-count",
+            "animation-direction", "animation-fill-mode", "animation-play-state",
+            
+            // Pseudo-elements
+            "content",
+            
+            // Misc
+            "cursor", "pointer-events", "user-select"
+        ];
+        
+        // Remove vendor prefixes and check the standardized property
+        const standardProperty = property.replace(/^-(webkit|moz|ms|o)-/, '');
+        return validProperties.includes(standardProperty);
+    }
+
+    function isValidCSSValue(property, value) {
+        if (!value || value === 'initial' || value === 'inherit' || value === 'unset') return true;
+        
+        // Helper function to check numeric values with units
+        const isValidNumericValue = (val) => {
+            return typeof val === 'string' && (
+                val === 'auto' ||
+                val === '0' ||
+                /^-?\d*\.?\d+(px|em|rem|%|vh|vw|vmin|vmax|ch|ex|cm|mm|in|pt|pc)$/.test(val) ||
+                /^calc\(.+\)$/.test(val)
+            );
+        };
+        
+        // Helper function to check color values
+        const isValidColor = (val) => {
+            return typeof val === 'string' && (
+                val === 'transparent' ||
+                val === 'currentColor' ||
+                /^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(val) ||
+                /^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/.test(val) ||
+                /^rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*[0-1]?\.?\d+\s*\)$/.test(val) ||
+                /^hsl\(\s*\d+\s*,\s*\d+%\s*,\s*\d+%\s*\)$/.test(val) ||
+                /^hsla\(\s*\d+\s*,\s*\d+%\s*,\s*\d+%\s*,\s*[0-1]?\.?\d+\s*\)$/.test(val)
+            );
+        };
+
+        // Normalize the property name
+        const normalizedProp = property.toLowerCase();
+        
+        switch (true) {
+            // Dimensions and positions
+            case /^(width|height|top|right|bottom|left|margin|padding|min-|max-)/i.test(normalizedProp):
+                return isValidNumericValue(value);
+                
+            // Colors
+            case /color$|background(-color)?$|border(-color)?$/i.test(normalizedProp):
+                if (value === 'none') return 'transparent';
+                return isValidColor(value);
+                
+            // Display
+            case normalizedProp === 'display':
+                return [
+                    'none', 'block', 'inline', 'inline-block', 'flex', 'inline-flex',
+                    'grid', 'inline-grid', 'table', 'table-cell', 'contents'
+                ].includes(value);
+                
+            // Position
+            case normalizedProp === 'position':
+                return ['static', 'relative', 'absolute', 'fixed', 'sticky'].includes(value);
+                
+            // Font weight
+            case normalizedProp === 'font-weight':
+                return ['normal', 'bold', 'lighter', 'bolder'].includes(value) ||
+                       (Number(value) >= 100 && Number(value) <= 900 && Number(value) % 100 === 0);
+                
+            // Opacity
+            case normalizedProp === 'opacity':
+                const num = parseFloat(value);
+                return !isNaN(num) && num >= 0 && num <= 1;
+                
+            // Border style
+            case /border(-.*)?-style$/i.test(normalizedProp):
+                return ['none', 'hidden', 'solid', 'dashed', 'dotted', 'double', 'groove', 'ridge', 'inset', 'outset'].includes(value);
+                
+            // Text align
+            case normalizedProp === 'text-align':
+                return ['left', 'right', 'center', 'justify'].includes(value);
+                
+            // Overflow
+            case /^overflow(-[xy])?$/i.test(normalizedProp):
+                return ['visible', 'hidden', 'scroll', 'auto'].includes(value);
+                
+            // Visibility
+            case normalizedProp === 'visibility':
+                return ['visible', 'hidden', 'collapse'].includes(value);
+                
+            // Z-index
+            case normalizedProp === 'z-index':
+                return value === 'auto' || !isNaN(parseInt(value, 10));
+                
+            // Transform
+            case normalizedProp === 'transform':
+                return value === 'none' || /^(matrix|translate|scale|rotate|skew)/.test(value);
+                
+            // Flex properties
+            case /^flex-/i.test(normalizedProp):
+                if (normalizedProp === 'flex-direction') {
+                    return ['row', 'row-reverse', 'column', 'column-reverse'].includes(value);
+                }
+                if (normalizedProp === 'flex-wrap') {
+                    return ['nowrap', 'wrap', 'wrap-reverse'].includes(value);
+                }
+                return true; // Other flex properties have complex validation
+                
+            // Default case
+            default:
+                return true; // Accept unknown properties but log them
+        }
+    }
+
+    function getComputedStyles(element, pseudo) {
+        const computed = window.getComputedStyle(element, pseudo);
+        const styles = {};
+
+        for (let i = 0; i < computed.length; i++) {
+            const property = computed[i];
+            const value = computed.getPropertyValue(property);
+
+            // 1. Whitelist check
+            if (!isValidCSSProperty(property)) {
+                continue;
+            }
+
+            // 2. Value validation
+            const validatedValue = isValidCSSValue(property, value);
+            if (!validatedValue) {
+                console.warn(`Invalid value for ${property}: ${value}`);
+                continue; // Skip invalid values
+            }
+            // Use validated value (which might have been corrected, like "none" -> "transparent")
+            const finalValue = typeof validatedValue === "string" ? validatedValue : value;
+
+            // 3. Handle vendor prefixes
+            if (property.startsWith("-")) {
+                const standardProperty = property.replace(/^-(webkit|moz|ms|o)-/, "");
+                if (computed.getPropertyValue(standardProperty)) {
+                    // Standard property exists, ignore the prefixed one
+                    continue;
+                } else {
+                    // Add the standard property
+                    if(isValidCSSProperty(standardProperty)){
+                        styles[standardProperty] = finalValue;
+                    }
+                    continue;
+                }
+            }
+
+            styles[property] = finalValue;
+        }
+
+        return styles;
+    }
+
+    /**
+     * Process a single element, extracting and storing its styles if important.
+     */
+    function processElement(element, selector) {
+        if (!isImportantElement(element)) {
+            return;
+        }
+
+        //This is where the styles are extracted and stored
+        extractAndStoreStyles(element, selector);
+
+        // Add a new function to handle interactive states
+        processInteractiveStates(element, selector, data.styles); // Pass data.styles
+    }
+
+    function extractAndStoreStyles(element, identifier){
+        const computedStyle = window.getComputedStyle(element);
+
+        // Store computed styles, filtered
+        data.styles.computedStyles[identifier] = {};
+        filterAndStoreComputedStyles(element, computedStyle, data.styles.computedStyles[identifier]);
+
+        // Merge inline styles with computed styles
+        if (element.style.length) {
+            for (let i = 0; i < element.style.length; i++) {
+                const prop = element.style[i];
+                data.styles.computedStyles[identifier][prop] = element.style[prop]; // Inline styles override computed
+            }
+        }
+
+        // Process pseudo-elements
+        ['::before', '::after'].forEach(pseudo => {
+            const pseudoStyle = window.getComputedStyle(element, pseudo);
+            if (pseudoStyle.content !== 'none') {
+                const pseudoIdentifier = `${identifier}${pseudo}`;
+                data.styles.computedStyles[pseudoIdentifier] = {};
+                filterAndStoreComputedStyles(element, pseudoStyle, data.styles.computedStyles[pseudoIdentifier]);
+            }
+        });
+    }
+
+    // Media Query Handling (Deduplication and Optimization)
+    function addMediaQueryRule(query, rules) {
+        // Normalize media query
+        query = query.toLowerCase()
+                    .replace(/\s+/g, ' ')
+                    .replace(/0px/g, '0')
+                    .replace(/\s*:\s*/g, ':')
+                    .trim();
+        
+        // Find existing media query or create new one
+        let existingMediaQuery = data.styles.mediaQueries.find(mq => mq.query === query);
+        if (existingMediaQuery) {
+            // Merge rules, avoiding duplicates
+            rules.forEach(newRule => {
+                const existingRule = existingMediaQuery.rules.find(r => 
+                    r.selector === newRule.selector
+                );
+                if (existingRule) {
+                    // Merge styles
+                    Object.assign(existingRule.styles, newRule.styles);
+                } else {
+                    existingMediaQuery.rules.push(newRule);
+                }
+            });
+        } else {
+            data.styles.mediaQueries.push({ query, rules });
+        }
+    }
+
+    // Helper function to determine if an element is important enough to process
+    function isImportantElement(element) {
+        // Skip script, style, meta, link, noscript, and iframe tags
+        if (['SCRIPT', 'STYLE', 'META', 'LINK', 'NOSCRIPT', 'IFRAME'].includes(element.tagName)) {
+            return false;
+        }
+
+        const computedStyle = window.getComputedStyle(element);
+        if (computedStyle.display === 'none' ||
+            computedStyle.visibility === 'hidden' ||
+            parseFloat(computedStyle.opacity) < 0.1 ||
+            element.offsetParent === null) {
+            return false;
+        }
+
+        // Check for event listeners *first*
+        if (element.hasAttributes() && Array.from(element.attributes).some(attr => attr.name.startsWith('on'))) {
+            return true;
+        }
+
+        // Check for ARIA roles and other interactive attributes
+        if (element.hasAttributes() && Array.from(element.attributes).some(attr => ['role', 'aria-label', 'aria-labelledby', 'aria-describedby', 'tabindex'].includes(attr.name))) {
+            return true;
+        }
+
+        // Important semantic elements
+        const importantTags = ['HEADER', 'FOOTER', 'NAV', 'MAIN', 'ARTICLE', 'SECTION', 'ASIDE', 'FORM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BUTTON', 'INPUT', 'TEXTAREA', 'SELECT', 'IMG', 'A']; // Expanded list
+        if (importantTags.includes(element.tagName)) return true;
+
+        // Important class/id patterns
+        const importantPatterns = [
+            'header', 'footer', 'nav', 'main', 'content',
+            'container', 'wrapper', 'layout', 'banner', 'hero',
+            'product', 'item', 'card', 'list', 'grid',
+            '-root', '-main', '-primary', '-container', '-item' // More comprehensive patterns
+        ];
+
+        const elementText = (element.id + ' ' + element.className).toLowerCase();
+        if (importantPatterns.some(pattern => elementText.includes(pattern))) {
+            return true;
+        }
+
+        // Check for significant text content
+        if (element.textContent.length > 20) {
+            return true;
+        }
+
+        return false; // No longer using hasSignificantChildren
+    }
+
+    // Helper function to determine if styles are unique/important
+    function hasImportantStyles(styles, parentStyles = null, element) {
+        const criticalProperties = {
+            layout: ['display', 'position', 'flex', 'grid', 'float'],
+            sizing: ['width', 'height', 'min-width', 'max-width', 'min-height', 'max-height'],
+            spacing: ['margin', 'padding'],
+            visual: ['background', 'border', 'box-shadow', 'border-radius'],
+            typography: ['font-family', 'font-size', 'font-weight', 'color', 'text-align']
+        };
+
+        // Create a temporary element of the *same type*
+        const tempElement = document.createElement(element.tagName);
+        document.body.appendChild(tempElement);
+        const defaultStyles = window.getComputedStyle(tempElement);
+        document.body.removeChild(tempElement);
+
+        for (const prop in styles) {
+            if (!styles.hasOwnProperty(prop)) continue;
+
+            const value = styles[prop];
+
+            // Check if property is critical - REMOVED the strict check
+            // let isImportant = false;
+            // for (const category in criticalProperties) {
+            //     if (criticalProperties[category].some(pattern => prop.startsWith(pattern))) {
+            //         isImportant = true;
+            //         break;
+            //     }
+            // }
+            // if (!isImportant) continue; // REMOVED
+
+            // Check against default styles *for this element type*
+            if (value === defaultStyles.getPropertyValue(prop)) continue;
+
+            // Check against parent styles (if available)
+            if (parentStyles && value === parentStyles[prop]) continue;
+
+            // Special case for font-family (compare first font)
+            if (prop === 'font-family' && parentStyles) {
+                const parentFonts = parentStyles[prop].split(',');
+                const elementFonts = value.split(',');
+                if (elementFonts[0].trim() === parentFonts[0].trim()) continue;
+            }
+
+            // If we get here, the style is important
+            return true;
+        }
+
+        return false; // No important styles found
+    }
+
+    // Add a new function to handle interactive states
+    function processInteractiveStates(element, selector, allStyles) {
+        const states = [':hover', ':focus', ':active'];
+        const baseStyles = getComputedStyles(element); // Get base styles *before* simulating
+
+        states.forEach(state => {
+            try {
+                // Simulate the state by temporarily adding a class
+                const tempClass = `temp-${state.substring(1)}`;
+                element.classList.add(tempClass);
+
+                // Use a CSS rule to apply the state
+                const style = document.createElement('style');
+                style.textContent = `${selector}.${tempClass}${state} { }`;
+                document.head.appendChild(style);
+
+                const stateStyles = getComputedStyles(element);
+
+                // Remove the temporary class and style
+                element.classList.remove(tempClass);
+                document.head.removeChild(style);
+
+                // Filter and store *only different* styles
+                const diffStyles = {};
+                for (const prop in stateStyles) {
+                    if (stateStyles.hasOwnProperty(prop) && stateStyles[prop] !== baseStyles[prop]) {
+                        diffStyles[prop] = stateStyles[prop];
+                    }
+                }
+
+                if (Object.keys(diffStyles).length > 0) {
+                    const stateSelector = `${selector}${state}`;
+                    allStyles.computedStyles[stateSelector] = diffStyles;
+                }
+
+            } catch (e) {
+                console.warn(`Error processing state ${state} for ${selector}:`, e);
+            }
+        });
     }
 
     // Listen for messages from extension
