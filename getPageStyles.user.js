@@ -752,6 +752,10 @@
         switch (true) {
             // Dimensions and positions
             case /^(width|height|top|right|bottom|left|margin|padding|min-|max-)/i.test(normalizedProp):
+                // Allow "none" for max-width and max-height
+                if ((normalizedProp === 'max-width' || normalizedProp === 'max-height') && value === 'none') {
+                    return true;
+                }
                 return isValidNumericValue(value);
                 
             // Colors
@@ -786,7 +790,8 @@
                 
             // Text align
             case normalizedProp === 'text-align':
-                return ['left', 'right', 'center', 'justify', 'start'].includes(value);
+                // Allow -moz-center
+                return ['left', 'right', 'center', 'justify', 'start', '-moz-center'].includes(value);
                 
             // Overflow
             case /^overflow(-[xy])?$/i.test(normalizedProp):
@@ -813,10 +818,7 @@
                     return ['nowrap', 'wrap', 'wrap-reverse'].includes(value);
                 }
                 return true; // Other flex properties have complex validation
-            // Max-width and max-height
-            case normalizedProp === 'max-width':
-            case normalizedProp === 'max-height':
-                return isValidNumericValue(value) || value === 'none';
+
             // Default case
             default:
                 return true; // Accept unknown properties but log them
@@ -896,39 +898,7 @@
             }
         }
 
-        // *** INFER INTERACTIVE STYLES HERE ***
-        const inferredHoverStyles = {};
-
-        if (element.tagName === 'A') {
-            // If it's a link, and doesn't already have an underline, add one
-            if (computedStyle.textDecorationLine !== 'underline') {
-                inferredHoverStyles['text-decoration'] = 'underline';
-            }
-
-            // Darken the color slightly, if it's not too dark already
-            const color = computedStyle.color;
-            if (color.startsWith('rgb')) {
-                const darkenedColor = darkenColor(color);
-                if (darkenedColor !== color) { // Only add if the color actually changed
-                    inferredHoverStyles.color = darkenedColor;
-                }
-            }
-        }
-
-        //If it has a background color, darken it
-        const backgroundColor = computedStyle.backgroundColor;
-        if(backgroundColor.startsWith('rgb')){
-            const darkenedBackgroundColor = darkenColor(backgroundColor);
-            if(darkenedBackgroundColor !== backgroundColor){
-                inferredHoverStyles.backgroundColor = darkenedBackgroundColor;
-            }
-        }
-
-        // Add the inferred styles to computedStyles, if any
-        if (Object.keys(inferredHoverStyles).length > 0) {
-            data.styles.computedStyles[`${identifier}:hover`] = inferredHoverStyles;
-        }
-
+        // REMOVE INFERRED STYLES - This was causing the black background
         // Process pseudo-elements
         ['::before', '::after'].forEach(pseudo => {
             const pseudoStyle = window.getComputedStyle(element, pseudo);
@@ -1072,87 +1042,76 @@
 
     // Add a new function to handle interactive states
     function processInteractiveStates(element, selector, allStyles) {
-        const states = [':hover', ':focus', ':active'];
-        const baseStyles = getComputedStyles(element); // Get base styles *before* any changes
+        const baseStyles = getComputedStyles(element); // Get base styles
 
-        console.log(`%cProcessing interactive states for: ${selector}`, 'color: blue; font-weight: bold;'); // Use styling for clarity
-
-        states.forEach(state => {
-            console.log(`%c  Processing state: ${state}`, 'color: green;');
-            try {
-                // 1. Create a unique temporary class.
-                const tempClass = `temp-${state.substring(1)}-${generateUUID()}`;
-                element.classList.add(tempClass);
-                console.log(`    Added temp class: ${tempClass}`);
-
-                // 2. Create an initial temporary stylesheet *without* any styles.
-                const initialStyle = document.createElement('style');
-                initialStyle.textContent = `${selector}.${tempClass}${state} {}`;
-                document.head.appendChild(initialStyle);
-                console.log(`    Added initial stylesheet: ${initialStyle.textContent}`);
-
-                // 3. Get the computed styles *after* applying the temporary class.
-                const intermediateStyles = getComputedStyles(element);
-                console.log(`    intermediateStyles:`, intermediateStyles);
-
-                // 4.  Remove the initial temporary style.
-                document.head.removeChild(initialStyle);
-                console.log(`    Removed initial stylesheet`);
-
-                // 5. Determine which styles have changed.
-                const changedStyles = {};
-                for (const prop in intermediateStyles) {
-                    if (intermediateStyles.hasOwnProperty(prop) && intermediateStyles[prop] !== baseStyles[prop]) {
-                        changedStyles[prop] = baseStyles[prop]; // Store the *original* value
-                    }
+        // Helper function to extract and store changed styles
+        function storeChangedStyles(state, newStyles) {
+            const diffStyles = {};
+            for (const prop in newStyles) {
+                if (newStyles.hasOwnProperty(prop) && newStyles[prop] !== baseStyles[prop]) {
+                    diffStyles[prop] = newStyles[prop];
                 }
-                console.log(`    changedStyles:`, changedStyles);
-
-                // 6.  Create a *second* temporary stylesheet if needed.
-                if (Object.keys(changedStyles).length > 0) {
-                    const finalStyle = document.createElement('style');
-                    let styleText = `${selector}.${tempClass}${state} { outline: none !important; `; // Always include outline
-                    for (const prop in changedStyles) {
-                        styleText += `${prop}: ${changedStyles[prop]} !important; `;
-                    }
-                    styleText += '}';
-                    finalStyle.textContent = styleText;
-                    document.head.appendChild(finalStyle);
-                    console.log(`    Added final stylesheet: ${finalStyle.textContent}`);
-
-                    // 7. Get the computed styles *again*.
-                    const finalStateStyles = getComputedStyles(element);
-                    console.log(`    finalStateStyles:`, finalStateStyles);
-
-                    // 8. Remove the temporary class and the second stylesheet.
-                    element.classList.remove(tempClass);
-                    document.head.removeChild(finalStyle);
-                    console.log(`    Removed temp class and final stylesheet`);
-
-                    // 9. Store only the styles that are *different* from the base styles.
-                    const diffStyles = {};
-                    for (const prop in finalStateStyles) {
-                        if (finalStateStyles.hasOwnProperty(prop) && finalStateStyles[prop] !== baseStyles[prop]) {
-                            diffStyles[prop] = finalStateStyles[prop];
-                        }
-                    }
-                    console.log(`    diffStyles:`, diffStyles);
-
-                    if (Object.keys(diffStyles).length > 0) {
-                        const stateSelector = `${selector}${state}`;
-                        allStyles.computedStyles[stateSelector] = diffStyles;
-                        console.log(`%c    Stored styles for ${stateSelector}:`, 'color: orange;', diffStyles);
-                    }
-                } else {
-                    // If no styles changed, we don't need to do anything.
-                    element.classList.remove(tempClass);
-                    console.log(`    No styles changed, removed temp class`);
-                }
-
-            } catch (e) {
-                console.warn(`Error processing state ${state} for ${selector}:`, e);
             }
-        });
+
+            if (Object.keys(diffStyles).length > 0) {
+                const stateSelector = `${selector}${state}`;
+                allStyles.computedStyles[stateSelector] = diffStyles;
+                console.log(`%c    Stored styles for ${stateSelector}:`, 'color: orange;', diffStyles);
+            } else if (state === ':hover' && element.tagName === 'A') {
+                // *** Fallback for link hover ***
+                allStyles.computedStyles[`${selector}:hover`] = { 'text-decoration': 'underline' };
+                console.log(`%c    Added fallback :hover style for ${selector}:`, 'color: orange;', { 'text-decoration': 'underline' });
+            }
+        }
+
+        // --- Simulate :hover ---
+        const mouseEnterListener = () => {
+            const hoverStyles = getComputedStyles(element);
+            storeChangedStyles(':hover', hoverStyles);
+            // Clean up listener immediately
+            element.removeEventListener('mouseenter', mouseEnterListener);
+        };
+        element.addEventListener('mouseenter', mouseEnterListener);
+
+        // --- Simulate :focus ---
+        const focusListener = () => {
+            console.log(`Focus event triggered for: ${selector}`); // DEBUG
+            const focusStyles = getComputedStyles(element);
+            console.log(`  Focus styles:`, focusStyles); // DEBUG
+            storeChangedStyles(':focus', focusStyles);
+            // Clean up listener immediately
+            element.removeEventListener('focus', focusListener);
+            // Also remove tabindex if we added it
+            if (element.hasAttribute('data-added-tabindex')) {
+                element.removeAttribute('tabindex');
+                element.removeAttribute('data-added-tabindex');
+            }
+        };
+
+        // Make the element focusable if it isn't already
+        if (!element.hasAttribute('tabindex')) {
+            element.setAttribute('tabindex', '-1');
+            element.setAttribute('data-added-tabindex', 'true'); // Mark that we added it
+        }
+        element.addEventListener('focus', focusListener);
+        element.focus(); // Trigger focus immediately
+
+
+        // --- Simulate :active ---
+        const mouseDownListener = () => {
+            console.log(`Mousedown event triggered for: ${selector}`); // DEBUG
+            const activeStyles = getComputedStyles(element);
+            console.log(`  Active styles:`, activeStyles); // DEBUG
+            storeChangedStyles(':active', activeStyles);
+
+            const mouseUpListener = () => {
+                // Clean up listeners
+                element.removeEventListener('mousedown', mouseDownListener);
+                element.removeEventListener('mouseup', mouseUpListener);
+            }
+            element.addEventListener('mouseup', mouseUpListener);
+        };
+        element.addEventListener('mousedown', mouseDownListener);
     }
 
     // Helper function to darken a color (RGB only)
