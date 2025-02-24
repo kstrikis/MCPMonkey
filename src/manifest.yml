@@ -2,7 +2,7 @@ name: __MSG_extName__
 version: __VERSION__
 manifest_version: 2
 description: __MSG_extDescription__
-author: Gerald
+author: kstrikis
 homepage_url: 'https://github.com/kstrikis/MCPMonkey'
 icons:
   '16': public/images/icon16.png
@@ -44,7 +44,6 @@ permissions:
   - clipboardWrite
   - contextMenus
   - cookies
-  - nativeMessaging
 commands:
   _execute_browser_action: {}
   toggleInjection:
@@ -70,5 +69,5 @@ minimum_chrome_version: '61.0'
 
 browser_specific_settings:
   gecko:
-    id: '{aecec67f-0d10-4fa7-b7c7-609a2db280cf}'
+    id: '{3292460b-e420-4c96-a8fd-a7cccf0efa5e}'
     strict_min_version: '58.0'
