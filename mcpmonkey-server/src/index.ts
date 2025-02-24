@@ -400,6 +400,98 @@ server.prompt(
     }
 );
 
+// Add schema for style data
+const StyleDataSchema = z.object({
+  // Allow any properties, but validate the ones we know about
+  globalStyles: z.record(z.string()).optional(),
+  computedStyles: z.record(z.record(z.string())).optional(),
+  colorScheme: z.object({
+    backgroundColor: z.string().optional(),
+    textColor: z.string().optional(),
+    linkColor: z.string().optional()
+  }).optional(),
+  typography: z.object({
+    fontFamily: z.string().optional(),
+    fontSize: z.string().optional(),
+    lineHeight: z.string().optional()
+  }).optional(),
+  mediaQueries: z.array(z.object({
+    query: z.string(),
+    rules: z.array(z.string())
+  })).optional(),
+}).passthrough(); // Allow additional properties we haven't specified
+
+// Add a tool to get page styles from active tab
+server.tool(
+  "getPageStyles",
+  "Extract complete styling information from the active tab. The response can include various style properties such as global styles, computed styles, color schemes, typography, and media queries. The exact structure is flexible to accommodate different page structures.",
+  {}, // No parameters needed
+  async () => {
+    try {
+      const requestId = crypto.randomUUID();
+      const actionMessage = {
+        type: 'executeAction',
+        requestId,
+        action: 'getStyles',
+        data: {
+          timestamp: Date.now()
+        }
+      };
+
+      log.info('Requesting page styles from most recent client', actionMessage);
+
+      if (!mostRecentClient || mostRecentClient.readyState !== WebSocket.OPEN) {
+        throw new Error('No active browser extension client available');
+      }
+
+      // Create a promise that will be resolved when we get the response
+      const responsePromise = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          pendingBrowserActions.delete(requestId);
+          reject(new Error('Style extraction timed out after 30 seconds'));
+        }, 30000);
+
+        pendingBrowserActions.set(requestId, { resolve, reject, timeout });
+      });
+
+      // Send request to most recent client
+      mostRecentClient.send(JSON.stringify(actionMessage));
+
+      // Wait for and validate the response
+      const result = await responsePromise;
+
+      try {
+        // Validate the style data structure
+        const validatedStyles = StyleDataSchema.parse(result);
+        log.info('Validated style data structure:', validatedStyles);
+      } catch (error) {
+        // Log validation issues but don't fail - the LLM can handle variations
+        log.warn('Style data validation warning (continuing anyway):', error);
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(result, null, 2)
+          }
+        ]
+      };
+    } catch (error) {
+      log.error("Failed to get page styles:", error);
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: `Failed to get page styles: ${error instanceof Error ? error.message : String(error)}`
+          }
+        ]
+      };
+    }
+  }
+);
+
 // Start the server
 (async () => {
   try {

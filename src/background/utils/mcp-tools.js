@@ -58,8 +58,8 @@ const STORAGE_KEYS = {
 
 // Message types for communication
 const MESSAGE_TYPES = {
-  TEST_DATA: 'MCPMonkey:testData',
-  TEST_RESPONSE: 'MCPMonkey:testResponse'
+  STYLE_REQUEST: 'MM_ext:styleRequest',
+  STYLE_RESPONSE: 'MM_us:styleResponse'
 };
 
 /**
@@ -271,6 +271,30 @@ async function duplicateTab({ tabId }) {
 }
 
 /**
+ * Inject the content script bridge for userscript communication
+ * @param {number} tabId - ID of the tab to inject into
+ */
+async function injectContentBridge(tabId) {
+  await browser.tabs.executeScript(tabId, {
+    code: `
+      // Minimal bridge to forward messages to extension
+      window.addEventListener('message', function(event) {
+        // Only forward userscript messages to the extension
+        if (event.source === window && event.data?.type?.startsWith('MM_us:')) {
+          browser.runtime.sendMessage(event.data).catch(error => {
+            console.error('Failed to forward message to extension:', error);
+          });
+        }
+      });
+      
+      console.log('MCP message bridge active');
+    `
+  });
+  
+  log.debug('Injected message bridge into tab:', tabId);
+}
+
+/**
  * Request page styling information from a specific tab
  * @param {Object} options
  * @param {number} options.tabId - ID of the tab to get styles from
@@ -282,105 +306,74 @@ async function getTabStyles({ tabId }) {
       throw new Error('tabId is required');
     }
 
-    // Send request through GM value
-    await browser.tabs.executeScript(tabId, {
-      code: `
-        GM_setValue('${STORAGE_KEYS.MESSAGE}', JSON.stringify({
-          command: 'getStyles',
-          timestamp: Date.now()
-        }));
-      `
-    });
+    log.info('Requesting styles from tab:', tabId);
 
-    // Wait for response
-    return new Promise((resolve, reject) => {
+    // Ensure content bridge is injected
+    await injectContentBridge(tabId);
+
+    // Set up message listener before sending request
+    const styleData = await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
+        log.error('Style extraction timed out for tab:', tabId);
+        cleanup();
         reject(new Error('Style extraction timed out'));
       }, 5000);
 
-      // Listen for storage changes
-      const listener = async (newValue) => {
-        if (!newValue) return;
+      function handleMessage(message) {
+        log.debug('Extension received message:', message);
         
-        try {
-          const response = JSON.parse(newValue);
-          if (response.error) {
-            reject(new Error(response.error));
-          } else {
-            resolve(response.data);
-          }
+        if (message.type === MESSAGE_TYPES.STYLE_RESPONSE) {
+          log.info('Received style response from userscript:', message);
           
-          // Clean up
-          await browser.storage.local.remove(STORAGE_KEYS.RESPONSE);
-          browser.storage.onChanged.removeListener(listener);
-          clearTimeout(timeout);
-        } catch (error) {
-          reject(error);
-        }
-      };
+          // Extract the actual style data from the response
+          const extractedStyles = message.data?.styles;
+          if (!extractedStyles) {
+            log.error('No style data in response:', message);
+            cleanup();
+            reject(new Error('No style data received from userscript'));
+            return;
+          }
 
-      addStorageListener(STORAGE_KEYS.RESPONSE, listener);
+          log.info('Extracted style data:', extractedStyles);
+          cleanup();
+          resolve({ styles: extractedStyles });  // Return object with styles property
+        }
+      }
+
+      function cleanup() {
+        log.debug('Cleaning up message listener');
+        browser.runtime.onMessage.removeListener(handleMessage);
+        clearTimeout(timeout);
+      }
+
+      // Listen for response
+      log.debug('Adding message listener');
+      browser.runtime.onMessage.addListener(handleMessage);
+
+      // Generate UUID for this request
+      const messageId = crypto.randomUUID();
+
+      // Send request via content script
+      log.debug('Sending style request to content script');
+      browser.tabs.executeScript(tabId, {
+        code: `
+          window.postMessage({
+            type: '${MESSAGE_TYPES.STYLE_REQUEST}',
+            messageId: '${messageId}',
+            data: {
+              timestamp: Date.now()
+            }
+          }, '*');
+        `
+      });
     });
+
+    return styleData;
   } catch (error) {
     log.error('Failed to get tab styles:', error);
     throw error;
   }
 }
-
-/**
- * Test communication functionality
- */
-async function testStorage() {
-  try {
-    log.info('Starting extension communication test...');
-    
-    // Inject content script to handle communication
-    const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-    if (!tabs.length) {
-      throw new Error('No active tab found');
-    }
-    
-    const tabId = tabs[0].id;
-    await browser.tabs.executeScript(tabId, {
-      code: `
-        // Listen for messages from userscript
-        window.addEventListener('message', function(event) {
-          if (event.data.type === '${MESSAGE_TYPES.TEST_DATA}') {
-            console.log('Content script received from userscript:', event.data);
-            // Forward to extension
-            browser.runtime.sendMessage(event.data);
-            
-            // Send response back to userscript
-            window.postMessage({
-              type: '${MESSAGE_TYPES.TEST_RESPONSE}',
-              data: {
-                received: event.data,
-                timestamp: Date.now()
-              }
-            }, '*');
-          }
-        });
-        
-        console.log('Content script injected and listening...');
-      `
-    });
-    
-    // Listen for messages from content script
-    browser.runtime.onMessage.addListener((message) => {
-      if (message.type === MESSAGE_TYPES.TEST_DATA) {
-        log.info('Extension received from userscript:', message);
-      }
-    });
-    
-    log.info('Extension test initialized...');
-    
-  } catch (error) {
-    log.error('Extension test failed:', error);
-  }
-}
-
-// Run test on startup
-testStorage();
 
 // Export all MCP tools
 export const mcpTools = {
@@ -390,6 +383,7 @@ export const mcpTools = {
   activateTab,
   duplicateTab,
   getTabStyles,
+  injectContentBridge,
   // Export storage utilities for other modules
   storage: {
     getValue,

@@ -202,7 +202,16 @@ async function executeAction(action, data) {
     createTab: async () => await mcpTools.createTab(data),
     closeTabs: async () => await mcpTools.closeTabs(data),
     activateTab: async () => await mcpTools.activateTab(data),
-    duplicateTab: async () => await mcpTools.duplicateTab(data)
+    duplicateTab: async () => await mcpTools.duplicateTab(data),
+    getStyles: async () => {
+      const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+      if (!tabs.length) {
+        throw new Error('No active tab found');
+      }
+      const result = await mcpTools.getTabStyles({ tabId: tabs[0].id });
+      // Return the entire result object
+      return result;
+    }
   };
 
   if (action in actions) {
