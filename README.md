@@ -45,7 +45,7 @@ MCPMonkey consists of two main components that need to be installed in the follo
 
 ### 1. Adding the MCP Server to Cursor
 
-Using the published NPM package:
+Using the published [NPM package](https://www.npmjs.com/package/mcpmonkey-server):
 
 - In Cursor, go to `Settings` > `Features` > `MCP Servers`
 - Click the `+ Add New MCP Server` button
@@ -77,6 +77,8 @@ node build/index.js
 
 Cursor connects to the MCPMonkey server using the stdio transport for MCP communication. Once configured, Cursor's Agent in Composer will automatically use available MCP tools when relevant.
 
+Note: in Cursor 0.46+ MCP settings are in their own tab and there is support for .cursor/mcp.json files. [More here.](https://docs.cursor.com/context/model-context-protocol)
+
 
 ### 2. Browser Extension Installation
 
@@ -89,6 +91,8 @@ Cursor connects to the MCPMonkey server using the stdio transport for MCP commun
 6. Select any file from the `dist` folder to load the extension
 
 Note: As this is a temporary installation, you'll need to reload the extension each time you restart Firefox.
+
+We plan on offering .xpi files soon.
 
 ### 
 
@@ -164,14 +168,10 @@ This project is based on [Violentmonkey](https://github.com/violentmonkey/violen
 
 ## Community
 
-Join our community to discuss MCPMonkey, share MCP servers, and get help:
-
-[Community Hub](https://mcpmonkey.com) - Share and discover MCP servers and scripts
-
-## Contributing
-
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+[https://mcpmonkey.com](https://mcpmonkey.com) - For more documentation and MCP tool scripts
 
 ## License
 
 This project is licensed under the same terms as Violentmonkey. See the [LICENSE](LICENSE) file for details.
+
+We may add paid features in the future.
