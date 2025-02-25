@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "memory": {
+      "command": "node",
+      "args": [
+        "/Users/kriss/Documents/gauntlet/mcp-misc/server-memory/server-memory.js"
+      ]
+    }
+  }
+}

@@ -6,24 +6,81 @@ MCPMonkey is a fork of [Violentmonkey](https://github.com/violentmonkey/violentm
 
 MCPMonkey enhances the browser extension capabilities of Violentmonkey to provide a user-friendly interface for managing and using [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol) servers. This allows AI language models like those used in Cursor to interact with your browser in meaningful ways.
 
-### Key Features
+### Current Features
+
+MCPMonkey currently implements these key features:
+
+- **Tab Management (browserAction Tool)**:
+  - Get information about all open tabs
+  - Create new tabs
+  - Close tabs
+  - Activate (focus) tabs
+  - Duplicate tabs
+  
+- **Page Style Extraction (getPageStyles Tool)**:
+  - Extract styling information from web pages for AI analysis
+  - Returns structured JSON data about styles
+  - Includes global styles, computed styles, color schemes, typography
+  
+- **User Script Support**: Full compatibility with existing userscripts (inherited from Violentmonkey)
+
+### Planned Features
+
+The following features are planned for future development:
 
 - **MCP Server Management**: Install and manage multiple MCP servers directly from your browser
 - **Enhanced Browser Access**: Allow AI tools to interact with:
-  - Open web pages and tabs
   - Browsing history
   - Bookmarks
   - Dev console logs
   - Other installed extensions
-- **User Script Support**: Full compatibility with existing userscripts (inherited from Violentmonkey)
 - **Permissions Control**: Fine-grained control over what resources each MCP server can access
 - **Community Hub**: Share and discover MCP servers and scripts
 
-## Installation
+## Cursor MCP Integration
 
-MCPMonkey is currently available as a development build that you need to install manually.
+MCPMonkey consists of two main components that need to be installed in the following order:
+1. MCP Server
+2. Browser Extension
 
-### Firefox Installation
+### 1. Adding the MCP Server to Cursor
+
+Using the published NPM package:
+
+- In Cursor, go to `Settings` > `Features` > `MCP Servers`
+- Click the `+ Add New MCP Server` button
+- Configure the connection with:
+   - Name: mcpmonkey-server
+   - Type: command
+   - Command: `npx mcpmonkey-server`
+
+Or if building yourself:
+
+```sh
+# Navigate to the server directory
+cd mcpmonkey-server
+
+# Install dependencies
+yarn
+
+# Build the server
+yarn build
+
+# Run the server
+node build/index.js
+```
+
+- Configuring in Cursor:
+   - Name: mcpmonkey-server
+   - Type: command
+   - Command: `node /absolute/path/to/mcpmonkey-server/build/index.js`
+
+Cursor connects to the MCPMonkey server using the stdio transport for MCP communication. Once configured, Cursor's Agent in Composer will automatically use available MCP tools when relevant.
+
+
+### 2. Browser Extension Installation
+
+#### Firefox Installation
 1. Build the project following the Development instructions below
 2. Open Firefox and navigate to `about:debugging`
 3. Click "This Firefox" in the left sidebar
@@ -32,6 +89,36 @@ MCPMonkey is currently available as a development build that you need to install
 6. Select any file from the `dist` folder to load the extension
 
 Note: As this is a temporary installation, you'll need to reload the extension each time you restart Firefox.
+
+### 
+
+### MCPMonkey's Browser Tools
+
+Our implementation of MCP tools provides AI language models like those in Cursor with powerful browser interaction capabilities:
+
+- **browserAction Tool**:
+  - Get information about all open tabs
+  - Create new tabs
+  - Close tabs
+  - Activate (focus) tabs
+  - Duplicate tabs
+  
+- **getPageStyles Tool**:
+  - Extract page styling information (global styles, computed styles, color schemes, typography)
+  - Returns structured JSON data for AI analysis
+  - Uses content script bridge for communication with web pages
+
+These tools allow AI models to have meaningful, context-aware interactions with your browsing session through a WebSocket connection on port 3025.
+
+
+For development and testing, you can run the server with the MCP inspector:
+
+```sh
+# Run with MCP inspector for debugging
+npx @modelcontextprotocol/inspector node build/index.js
+```
+
+The server implements both stdio and WebSocket interfaces, with the WebSocket server running on port 3025 for internal communication with the browser extension.
 
 ## Use Cases
 
@@ -47,6 +134,8 @@ Note: As this is a temporary installation, you'll need to reload the extension e
 
 ## Development
 
+### Extension Development
+
 Install [Node.js](https://nodejs.org/) and Yarn v1.x.  
 The version of Node.js should match `"node"` key in `package.json`.
 
@@ -60,6 +149,24 @@ $ yarn dev
 
 Then load the extension from 'dist/'.
 
+### Server Development
+
+The MCP server is implemented in TypeScript and uses the Model Context Protocol SDK:
+
+```sh
+# Navigate to the server directory
+cd mcpmonkey-server
+
+# Install dependencies
+yarn
+
+# Build the server
+yarn build
+
+# Run the server in development mode
+yarn dev
+```
+
 ### Build
 
 ```sh
@@ -69,6 +176,15 @@ $ yarn build
 # Build for self-hosted release that has an update_url
 $ yarn build:selfHosted
 ```
+
+## Technical Details
+
+Currently implemented technical components:
+
+- **WebSocket Communication**: The extension and server communicate internally via WebSocket on port 3025
+- **Content Script Bridge**: Allows for interaction with web page content through secure messaging
+- **Zod Schema Validation**: Ensures data integrity between components with runtime type checking
+- **Stdio Transport**: External MCP clients like Cursor connect via stdio transport
 
 ## Credits
 
