@@ -144,38 +144,10 @@ The version of Node.js should match `"node"` key in `package.json`.
 $ yarn
 
 # Watch and compile
-$ yarn dev
+$ yarn build
 ```
 
 Then load the extension from 'dist/'.
-
-### Server Development
-
-The MCP server is implemented in TypeScript and uses the Model Context Protocol SDK:
-
-```sh
-# Navigate to the server directory
-cd mcpmonkey-server
-
-# Install dependencies
-yarn
-
-# Build the server
-yarn build
-
-# Run the server in development mode
-yarn dev
-```
-
-### Build
-
-```sh
-# Build for normal releases
-$ yarn build
-
-# Build for self-hosted release that has an update_url
-$ yarn build:selfHosted
-```
 
 ## Technical Details
 
@@ -189,13 +161,6 @@ Currently implemented technical components:
 ## Credits
 
 This project is based on [Violentmonkey](https://github.com/violentmonkey/violentmonkey), an excellent userscript manager that provides the foundation for MCPMonkey's enhanced capabilities. We extend our gratitude to the Violentmonkey team and contributors for their outstanding work.
-
-## Environment Variables
-
-The following environment variables are required for various features:
-
-- `SYNC_GOOGLE_CLIENT_ID` / `SYNC_GOOGLE_CLIENT_SECRET` - Google sync service
-- `SYNC_ONEDRIVE_CLIENT_ID` / `SYNC_ONEDRIVE_CLIENT_SECRET` - OneDrive sync service
 
 ## Community
 
