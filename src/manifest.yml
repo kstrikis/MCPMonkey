@@ -71,3 +71,4 @@ browser_specific_settings:
   gecko:
     id: '{3292460b-e420-4c96-a8fd-a7cccf0efa5e}'
     strict_min_version: '58.0'
+    update_url: 'https://mcpmonkey.com/extension/updates.json'
