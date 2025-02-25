@@ -166,8 +166,7 @@ This project is based on [Violentmonkey](https://github.com/violentmonkey/violen
 
 Join our community to discuss MCPMonkey, share MCP servers, and get help:
 
-[Community Hub](https://mcpmonkey.org) - Share and discover MCP servers and scripts
-[Discord](https://discord.gg/XHtUNSm6Xc) - Join our Discord server for discussions
+[Community Hub](https://mcpmonkey.com) - Share and discover MCP servers and scripts
 
 ## Contributing
 
