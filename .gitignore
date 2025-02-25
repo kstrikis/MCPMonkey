@@ -8,3 +8,4 @@ node_modules/
 .eslintcache
 .env
 .cursor/mcp.json
+/docs/**
